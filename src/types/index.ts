@@ -7,6 +7,14 @@ export interface BlurArea {
   type: 'mosaic' | 'blur'
 }
 
+export interface BlurLog {
+  id: string
+  timestamp: string
+  action: 'submit' | 'approve' | 'reject' | 'resubmit'
+  operator: string
+  reason?: string
+}
+
 export interface CaseAsset {
   id: string
   customerId: string
@@ -27,6 +35,8 @@ export interface CaseAsset {
   isBlurred: boolean
   blurAreas: BlurArea[]
   blurReviewStatus: 'pending' | 'approved' | 'rejected'
+  blurLogs: BlurLog[]
+  blurRejectReason: string
   authorizationStatus: 'authorized' | 'pending' | 'rejected' | 'expired'
   authorizationExpiry: string
   tags: string[]
@@ -35,6 +45,7 @@ export interface CaseAsset {
   consultationSummary: string
   usageCount: number
   reviewStatus: 'pending' | 'approved' | 'rejected'
+  packageIds: string[]
 }
 
 export interface Customer {

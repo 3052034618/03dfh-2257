@@ -30,6 +30,22 @@ function saveToStorage(state: PersistedState) {
 
 const persisted = loadFromStorage()
 
+function buildInitialAssets() {
+  const assets = persisted?.assets || initialAssets
+  const packages = persisted?.packages || initialPackages
+  const pkgMap = new Map<string, string[]>()
+  packages.forEach((pkg) => {
+    pkg.caseIds.forEach((cid) => {
+      if (!pkgMap.has(cid)) pkgMap.set(cid, [])
+      pkgMap.get(cid)!.push(pkg.id)
+    })
+  })
+  return assets.map((a) => ({
+    ...a,
+    packageIds: Array.from(new Set([...(a.packageIds || []), ...(pkgMap.get(a.id) || [])])),
+  }))
+}
+
 interface AppState {
   assets: CaseAsset[]
   packages: MaterialPackage[]
@@ -37,6 +53,7 @@ interface AppState {
 
   addAsset: (asset: CaseAsset) => void
   updateAsset: (id: string, updates: Partial<CaseAsset>) => void
+  batchUpdateAssets: (ids: string[], updates: Partial<CaseAsset>) => void
   deleteAsset: (id: string) => void
 
   addPackage: (pkg: MaterialPackage) => void
@@ -47,12 +64,14 @@ interface AppState {
 
   incrementUsageCount: (caseId: string, amount?: number) => void
   incrementPackageUsage: (caseIds: string[], amount?: number) => void
+  addBlurLog: (caseId: string, log: Omit<import('@/types').BlurLog, 'id' | 'timestamp'>) => void
   resetStore: () => void
 }
 
 export const useStore = create<AppState>((set) => {
+  const initialAssets = buildInitialAssets()
   const baseState = {
-    assets: persisted?.assets || initialAssets,
+    assets: initialAssets,
     packages: persisted?.packages || initialPackages,
     downloadRequests: persisted?.downloadRequests || initialRequests,
   }
@@ -82,6 +101,16 @@ export const useStore = create<AppState>((set) => {
         return next
       }),
 
+    batchUpdateAssets: (ids, updates) =>
+      set((state) => {
+        const next = {
+          ...state,
+          assets: state.assets.map((a) => (ids.includes(a.id) ? { ...a, ...updates } : a)),
+        }
+        persist(next)
+        return next
+      }),
+
     deleteAsset: (id) =>
       set((state) => {
         const next = { ...state, assets: state.assets.filter((a) => a.id !== id) }
@@ -92,6 +121,11 @@ export const useStore = create<AppState>((set) => {
     addPackage: (pkg) =>
       set((state) => {
         const next = { ...state, packages: [...state.packages, pkg] }
+        next.assets = next.assets.map((a) =>
+          pkg.caseIds.includes(a.id)
+            ? { ...a, packageIds: Array.from(new Set([...(a.packageIds || []), pkg.id])) }
+            : a
+        )
         persist(next)
         return next
       }),
@@ -149,10 +183,27 @@ export const useStore = create<AppState>((set) => {
         return next
       }),
 
+    addBlurLog: (caseId, log) =>
+      set((state) => {
+        const newLog = {
+          ...log,
+          id: 'BL' + Date.now() + Math.random().toString(36).slice(2, 6),
+          timestamp: new Date().toISOString(),
+        }
+        const next = {
+          ...state,
+          assets: state.assets.map((a) =>
+            a.id === caseId ? { ...a, blurLogs: [...(a.blurLogs || []), newLog] } : a
+          ),
+        }
+        persist(next)
+        return next
+      }),
+
     resetStore: () => {
       localStorage.removeItem(STORAGE_KEY)
       set({
-        assets: initialAssets,
+        assets: buildInitialAssets(),
         packages: initialPackages,
         downloadRequests: initialRequests,
       })

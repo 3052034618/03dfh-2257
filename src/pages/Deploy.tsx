@@ -3,7 +3,8 @@ import { useStore } from '@/store/useStore'
 import type { CaseAsset, MaterialPackage } from '@/types'
 import StatusBadge from '@/components/StatusBadge'
 import CompareModal from '@/components/CompareModal'
-import { Filter, Search, Package, Download, Check, X, ChevronDown, ChevronUp, Send, Eye, SlidersHorizontal } from 'lucide-react'
+import { VideoPreviewModal, VideoOverlay } from '@/components/VideoPreviewModal'
+import { Filter, Search, Package, Download, Check, X, ChevronDown, ChevronUp, Send, Eye, SlidersHorizontal, Play, Clock, TrendingUp } from 'lucide-react'
 import { allChannels, treatmentProjects } from '@/data/mockData'
 
 const ageGroups = ['18-30', '31-40', '41-50']
@@ -24,6 +25,7 @@ export default function Deploy() {
   const [pkgChannels, setPkgChannels] = useState<string[]>([])
   const [compareAsset, setCompareAsset] = useState<CaseAsset | null>(null)
   const [searchText, setSearchText] = useState('')
+  const [videoPreview, setVideoPreview] = useState<{ isOpen: boolean; url: string; title: string }>({ isOpen: false, url: '', title: '' })
 
   const toggleFilterItem = (arr: string[], setArr: (v: string[]) => void, item: string) => {
     setArr(arr.includes(item) ? arr.filter((i) => i !== item) : [...arr, item])
@@ -64,6 +66,15 @@ export default function Deploy() {
     setSelectedIds(next)
   }
 
+  const openVideo = (asset: CaseAsset, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    setVideoPreview({
+      isOpen: true,
+      url: asset.mediaUrl,
+      title: `${asset.customerName} - ${asset.treatmentProject}`,
+    })
+  }
+
   const handleCreatePackage = () => {
     if (!pkgName.trim() || !pkgChannels.length) return
     const pkg: MaterialPackage = {
@@ -95,6 +106,10 @@ export default function Deploy() {
 
   const pendingRequests = downloadRequests.filter((r) => r.status === 'pending')
 
+  const totalDownloads = packages.reduce((sum, p) => sum + p.downloadCount, 0)
+  const totalPackages = packages.length
+  const approvedPackages = packages.filter(p => p.status === 'approved').length
+
   const CheckboxItem = ({ checked, onChange, label }: { checked: boolean; onChange: () => void; label: string }) => (
     <label className="flex items-center gap-2 cursor-pointer text-sm text-charcoal/70 hover:text-charcoal select-none">
       <input
@@ -113,6 +128,42 @@ export default function Deploy() {
       <span className="select-none">{label}</span>
     </label>
   )
+
+  const renderMedia = (asset: CaseAsset) => {
+    if (asset.mediaType === 'video') {
+      return (
+        <div
+          className="relative aspect-[4/3] bg-cream-dark cursor-pointer group"
+          onClick={(e) => openVideo(asset, e)}
+        >
+          <img src={asset.thumbnailUrl} alt="" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+          <VideoOverlay />
+          <div className="absolute top-2 left-2 flex gap-1.5">
+            <span className="bg-rose-gold text-white text-xs px-2 py-0.5 rounded-full font-medium inline-flex items-center gap-1">
+              <Play size={10} fill="white" />视频
+            </span>
+            {asset.recoveryDays > 0 && (
+              <span className="bg-charcoal/70 text-white text-xs px-2 py-0.5 rounded-full font-medium inline-flex items-center gap-1">
+                <Clock size={10} />{asset.recoveryDays}天
+              </span>
+            )}
+          </div>
+        </div>
+      )
+    }
+    return (
+      <div className="relative aspect-[4/3] bg-cream-dark">
+        <img src={asset.thumbnailUrl} alt="" className="w-full h-full object-cover" />
+        {asset.recoveryDays > 0 && (
+          <div className="absolute top-2 left-2">
+            <span className="bg-charcoal/70 text-white text-xs px-2 py-0.5 rounded-full font-medium inline-flex items-center gap-1">
+              <Clock size={10} />{asset.recoveryDays}天
+            </span>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="flex gap-6 relative">
@@ -186,9 +237,34 @@ export default function Deploy() {
       </div>
 
       <div className="flex-1 min-w-0 space-y-8">
-        <div>
-          <h1 className="page-title">投放选用</h1>
-          <p className="text-sm text-charcoal/50 mt-1">筛选可公开案例，生成投放素材包</p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="page-title">投放选用</h1>
+            <p className="text-sm text-charcoal/50 mt-1">筛选可公开案例，生成投放素材包</p>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="card p-3 flex items-center gap-2">
+              <Package className="w-4 h-4 text-rose-gold" />
+              <div>
+                <p className="text-[10px] text-charcoal/50">素材包</p>
+                <p className="text-sm font-semibold text-charcoal">{totalPackages}</p>
+              </div>
+            </div>
+            <div className="card p-3 flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-emerald" />
+              <div>
+                <p className="text-[10px] text-charcoal/50">已通过</p>
+                <p className="text-sm font-semibold text-charcoal">{approvedPackages}</p>
+              </div>
+            </div>
+            <div className="card p-3 flex items-center gap-2">
+              <Download className="w-4 h-4 text-amber-warn" />
+              <div>
+                <p className="text-[10px] text-charcoal/50">总下载</p>
+                <p className="text-sm font-semibold text-charcoal">{totalDownloads}</p>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="grid grid-cols-3 gap-4">
@@ -196,28 +272,42 @@ export default function Deploy() {
             const preOp = findPreOp(asset)
             const isSelected = selectedIds.has(asset.id)
             return (
-              <div key={asset.id} className={`card p-0 overflow-hidden transition-shadow ${isSelected ? 'ring-2 ring-rose-gold' : ''}`}>
-                <div className="relative aspect-[4/3] bg-cream-dark">
-                  <img src={asset.thumbnailUrl} alt="" className="w-full h-full object-cover" />
+              <div key={asset.id} className={`card p-0 overflow-hidden transition-all ${isSelected ? 'ring-2 ring-rose-gold' : ''}`}>
+                {renderMedia(asset)}
+                <div className="relative">
                   {preOp && (
-                    <div className="absolute bottom-2 left-2 w-16 h-16 rounded-lg overflow-hidden border-2 border-white/80 shadow-md">
+                    <div className="absolute -top-8 left-2 w-14 h-14 rounded-lg overflow-hidden border-2 border-white/80 shadow-md">
                       <img src={preOp.thumbnailUrl} alt="" className="w-full h-full object-cover" />
+                      {preOp.mediaType === 'video' && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                          <Play className="w-4 h-4 text-white fill-white" />
+                        </div>
+                      )}
                     </div>
                   )}
-                  <div className="absolute top-2 right-2">
+                  <div className="absolute -top-8 right-2">
                     <StatusBadge status={asset.authorizationStatus} type="auth" />
                   </div>
-                  <button onClick={() => setCompareAsset(asset)} className="absolute bottom-2 right-2 bg-charcoal/60 hover:bg-charcoal/80 text-white text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-colors">
+                  <button onClick={(e) => { e.stopPropagation(); setCompareAsset(asset) }} className="absolute -top-8 right-14 bg-charcoal/60 hover:bg-charcoal/80 text-white text-xs px-2 py-1 rounded-lg flex items-center gap-1 transition-colors">
                     <Eye size={12} /> 对比
                   </button>
                 </div>
                 <div className="p-3 space-y-2">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-charcoal truncate">{asset.customerName} · {asset.treatmentProject}</p>
-                      <p className="text-xs text-charcoal/50">{asset.customerAgeGroup} · 恢复 {asset.recoveryDays} 天</p>
+                      <p className="text-sm font-medium text-charcoal truncate">
+                        {asset.customerName} · {asset.treatmentProject}
+                      </p>
+                      <p className="text-xs text-charcoal/50">
+                        {asset.customerAgeGroup} · 恢复 {asset.recoveryDays} 天
+                        {asset.mediaType === 'video' && <span className="ml-2 text-rose-gold">· 视频</span>}
+                      </p>
+                      <p className="text-[10px] text-charcoal/40 flex items-center gap-1 mt-0.5">
+                        <TrendingUp className="w-3 h-3" />使用 {asset.usageCount} 次
+                        {asset.packageIds?.length > 0 && <span className="ml-2">· {asset.packageIds.length} 个素材包</span>}
+                      </p>
                     </div>
-                    <button onClick={() => toggleSelect(asset.id)} className={`flex-shrink-0 w-5 h-5 rounded border flex items-center justify-center transition-colors ${isSelected ? 'bg-rose-gold border-rose-gold text-white' : 'border-charcoal/20'}`}>
+                    <button onClick={(e) => { e.stopPropagation(); toggleSelect(asset.id) }} className={`flex-shrink-0 w-5 h-5 rounded border flex items-center justify-center transition-colors ${isSelected ? 'bg-rose-gold border-rose-gold text-white' : 'border-charcoal/20'}`}>
                       {isSelected && <Check size={14} />}
                     </button>
                   </div>
@@ -244,18 +334,24 @@ export default function Deploy() {
             <div className="card p-6 text-center text-charcoal/30 text-sm">暂无待审批请求</div>
           ) : (
             <div className="space-y-2">
-              {pendingRequests.map((req) => (
-                <div key={req.id} className="card p-4 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-charcoal">{req.packageName}</p>
-                    <p className="text-xs text-charcoal/50">{req.requestedBy} · {req.requestedAt}</p>
+              {pendingRequests.map((req) => {
+                const pkg = packages.find(p => p.id === req.packageId)
+                return (
+                  <div key={req.id} className="card p-4 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-charcoal">{req.packageName}</p>
+                      <p className="text-xs text-charcoal/50">
+                        {req.requestedBy} · {req.requestedAt}
+                        {pkg && <span className="ml-2">· {pkg.caseIds.length} 个案例</span>}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => handleApproveDownload(req)} className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1"><Check size={12} /> 批准</button>
+                      <button onClick={() => updateDownloadRequest(req.id, { status: 'rejected' })} className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1"><X size={12} /> 拒绝</button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => handleApproveDownload(req)} className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1"><Check size={12} /> 批准</button>
-                    <button onClick={() => updateDownloadRequest(req.id, { status: 'rejected' })} className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1"><X size={12} /> 拒绝</button>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </section>
@@ -280,6 +376,23 @@ export default function Deploy() {
                   {pkg.targetChannels.map((ch) => (
                     <span key={ch} className="text-[10px] bg-rose-gold/10 text-rose-gold px-2 py-0.5 rounded-full">{ch}</span>
                   ))}
+                </div>
+                <div className="mt-3 pt-3 border-t border-charcoal/5">
+                  <p className="text-[10px] text-charcoal/40 mb-1">包含案例：</p>
+                  <div className="flex flex-wrap gap-1">
+                    {pkg.caseIds.slice(0, 5).map((cid) => {
+                      const c = assets.find(a => a.id === cid)
+                      return c ? (
+                        <span key={cid} className="text-[10px] bg-cream text-charcoal/60 px-1.5 py-0.5 rounded">
+                          {c.customerName}
+                          {c.mediaType === 'video' && <span className="text-rose-gold ml-0.5">▶</span>}
+                        </span>
+                      ) : null
+                    })}
+                    {pkg.caseIds.length > 5 && (
+                      <span className="text-[10px] text-charcoal/40">+{pkg.caseIds.length - 5}</span>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -321,12 +434,36 @@ export default function Deploy() {
                 })}
               </div>
             </div>
+            <div className="bg-cream/50 rounded-lg p-3">
+              <p className="text-xs text-charcoal/50 mb-2">已选案例预览</p>
+              <div className="flex flex-wrap gap-1">
+                {Array.from(selectedIds).slice(0, 8).map((cid) => {
+                  const c = assets.find(a => a.id === cid)
+                  return c ? (
+                    <span key={cid} className="text-[10px] bg-white border border-charcoal/10 text-charcoal/70 px-2 py-1 rounded">
+                      {c.customerName}
+                      {c.mediaType === 'video' && <span className="text-rose-gold ml-0.5">▶</span>}
+                    </span>
+                  ) : null
+                })}
+                {selectedIds.size > 8 && (
+                  <span className="text-[10px] text-charcoal/40 px-2 py-1">+{selectedIds.size - 8} 更多</span>
+                )}
+              </div>
+            </div>
             <button onClick={handleCreatePackage} disabled={!pkgName.trim() || !pkgChannels.length} className="btn-primary w-full text-sm disabled:opacity-40 disabled:cursor-not-allowed">
               确认创建（{selectedIds.size} 个案例）
             </button>
           </div>
         </div>
       )}
+
+      <VideoPreviewModal
+        isOpen={videoPreview.isOpen}
+        onClose={() => setVideoPreview(prev => ({ ...prev, isOpen: false }))}
+        videoUrl={videoPreview.url}
+        title={videoPreview.title}
+      />
     </div>
   )
 }
