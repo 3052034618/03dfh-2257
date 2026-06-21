@@ -15,6 +15,13 @@ export interface BlurLog {
   reason?: string
 }
 
+export interface ComplianceNote {
+  id: string
+  timestamp: string
+  author: string
+  content: string
+}
+
 export interface CaseAsset {
   id: string
   customerId: string
@@ -46,6 +53,7 @@ export interface CaseAsset {
   usageCount: number
   reviewStatus: 'pending' | 'approved' | 'rejected'
   packageIds: string[]
+  complianceNotes: ComplianceNote[]
 }
 
 export interface Customer {
@@ -85,6 +93,10 @@ export interface DownloadRequest {
   requestedBy: string
   status: 'pending' | 'approved' | 'rejected'
   requestedAt: string
+  caseIds: string[]
+  targetChannels: string[]
+  approvedAt?: string
+  approvedBy?: string
 }
 
 export type AuthStatus = CaseAsset['authorizationStatus']

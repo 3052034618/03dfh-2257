@@ -9,7 +9,8 @@ interface UploadedFile {
   name: string
   type: 'photo' | 'video'
   progress: number
-  preview: string
+  mediaUrl: string
+  thumbnailUrl: string
 }
 
 const PLACEHOLDER_IMG = 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=medical%20beauty%20photo%20clinical&image_size=square'
@@ -102,15 +103,23 @@ export default function Ingestion() {
     const isVideo = file.type.startsWith('video')
     const type = isVideo ? 'video' : 'photo'
     const id = 'F' + Date.now() + Math.random().toString(36).slice(2, 6)
-    let preview = isVideo ? VIDEO_PLACEHOLDER : PLACEHOLDER_IMG
+    let mediaUrl = isVideo ? VIDEO_PLACEHOLDER : PLACEHOLDER_IMG
+    let thumbnailUrl = isVideo ? VIDEO_PLACEHOLDER : PLACEHOLDER_IMG
 
-    setFiles((prev) => [...prev, { id, name: file.name, type, progress: 0, preview }])
+    setFiles((prev) => [...prev, { id, name: file.name, type, progress: 0, mediaUrl, thumbnailUrl }])
 
     try {
       if (isVideo) {
-        preview = await generateVideoThumbnail(file)
+        const [videoDataUrl, thumbnailDataUrl] = await Promise.all([
+          readFileAsDataURL(file),
+          generateVideoThumbnail(file),
+        ])
+        mediaUrl = videoDataUrl
+        thumbnailUrl = thumbnailDataUrl
       } else {
-        preview = await readFileAsDataURL(file)
+        const dataUrl = await readFileAsDataURL(file)
+        mediaUrl = dataUrl
+        thumbnailUrl = dataUrl
       }
     } catch (e) {
       // keep placeholder
@@ -120,7 +129,7 @@ export default function Ingestion() {
     const interval = setInterval(() => {
       progress = Math.min(progress + Math.random() * 25, 100)
       setFiles((prev) =>
-        prev.map((f) => (f.id === id ? { ...f, progress, preview } : f))
+        prev.map((f) => (f.id === id ? { ...f, progress, mediaUrl, thumbnailUrl } : f))
       )
       if (progress >= 100) {
         clearInterval(interval)
@@ -174,8 +183,8 @@ export default function Ingestion() {
           doctorName: form.doctorName,
           uploadDate: new Date().toISOString().slice(0, 10),
           mediaType: f.type,
-          mediaUrl: f.preview,
-          thumbnailUrl: f.preview,
+          mediaUrl: f.mediaUrl,
+          thumbnailUrl: f.thumbnailUrl,
           phase: form.phase,
           recoveryDays: Number(form.recoveryDays) || 0,
           shootAngle: form.shootAngle,
@@ -200,6 +209,7 @@ export default function Ingestion() {
           consultationSummary: form.consultationSummary,
           usageCount: 0,
           reviewStatus: 'pending',
+          complianceNotes: [],
         }
         addAsset(asset)
       })
@@ -243,7 +253,7 @@ export default function Ingestion() {
               <div key={f.id} className="relative group rounded-lg overflow-hidden border border-charcoal/5 bg-cream-dark/50">
                 {f.type === 'video' ? (
                   <div className="relative aspect-square">
-                    <img src={f.preview} alt={f.name} className={`w-full h-full object-cover ${blurEnabled ? 'blur-md' : ''}`} />
+                    <img src={f.thumbnailUrl} alt={f.name} className={`w-full h-full object-cover ${blurEnabled ? 'blur-md' : ''}`} />
                     <div className="absolute inset-0 flex items-center justify-center bg-charcoal/30">
                       <div className="w-10 h-10 rounded-full bg-rose-gold/90 flex items-center justify-center">
                         <Video size={20} className="text-white ml-0.5" />
@@ -251,7 +261,7 @@ export default function Ingestion() {
                     </div>
                   </div>
                 ) : (
-                  <img src={f.preview} alt={f.name} className={`w-full aspect-square object-cover ${blurEnabled ? 'blur-md' : ''}`} />
+                  <img src={f.thumbnailUrl} alt={f.name} className={`w-full aspect-square object-cover ${blurEnabled ? 'blur-md' : ''}`} />
                 )}
                 <div className="absolute top-2 left-2 bg-charcoal/60 rounded-full p-1">
                   {f.type === 'photo' ? <Image size={12} className="text-white" /> : <Video size={12} className="text-white" />}
@@ -374,7 +384,7 @@ export default function Ingestion() {
             <div className="flex gap-2 mt-3">
               {files.slice(0, 4).map((f) => (
                 <div key={f.id} className="relative">
-                  <img src={f.preview} alt="" className={`w-12 h-12 rounded object-cover border border-charcoal/5 ${blurEnabled ? 'blur-sm' : ''}`} />
+                  <img src={f.thumbnailUrl} alt="" className={`w-12 h-12 rounded object-cover border border-charcoal/5 ${blurEnabled ? 'blur-sm' : ''}`} />
                   {f.type === 'video' && (
                     <div className="absolute inset-0 flex items-center justify-center">
                       <Video size={12} className="text-white" />

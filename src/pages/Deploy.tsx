@@ -10,7 +10,7 @@ import { allChannels, treatmentProjects } from '@/data/mockData'
 const ageGroups = ['18-30', '31-40', '41-50']
 
 export default function Deploy() {
-  const { assets, packages, downloadRequests, addPackage, updatePackage, updateDownloadRequest, incrementPackageUsage } = useStore()
+  const { assets, packages, downloadRequests, addPackage, updatePackage, updateDownloadRequest, incrementPackageUsage, requestDownloadFromPackage, approveDownloadRequestExtended } = useStore()
   const [filterOpen, setFilterOpen] = useState(true)
   const [selectedProjects, setSelectedProjects] = useState<string[]>([])
   const [selectedAgeGroups, setSelectedAgeGroups] = useState<string[]>([])
@@ -26,6 +26,7 @@ export default function Deploy() {
   const [compareAsset, setCompareAsset] = useState<CaseAsset | null>(null)
   const [searchText, setSearchText] = useState('')
   const [videoPreview, setVideoPreview] = useState<{ isOpen: boolean; url: string; title: string }>({ isOpen: false, url: '', title: '' })
+  const [appliedPkgIds, setAppliedPkgIds] = useState<Set<string>>(new Set())
 
   const toggleFilterItem = (arr: string[], setArr: (v: string[]) => void, item: string) => {
     setArr(arr.includes(item) ? arr.filter((i) => i !== item) : [...arr, item])
@@ -96,11 +97,24 @@ export default function Deploy() {
   }
 
   const handleApproveDownload = (req: typeof downloadRequests[0]) => {
-    updateDownloadRequest(req.id, { status: 'approved' })
-    const pkg = packages.find((p) => p.id === req.packageId)
-    if (pkg) {
-      updatePackage(pkg.id, { downloadCount: pkg.downloadCount + 1 })
-      incrementPackageUsage(pkg.caseIds, 1)
+    approveDownloadRequestExtended(req.id, '当前用户')
+  }
+
+  const handleRequestDownload = (pkgId: string) => {
+    const newId = requestDownloadFromPackage(pkgId, '当前用户')
+    if (newId) {
+      setAppliedPkgIds((prev) => {
+        const next = new Set(prev)
+        next.add(pkgId)
+        return next
+      })
+      setTimeout(() => {
+        setAppliedPkgIds((prev) => {
+          const next = new Set(prev)
+          next.delete(pkgId)
+          return next
+        })
+      }, 3000)
     }
   }
 
@@ -109,6 +123,43 @@ export default function Deploy() {
   const totalDownloads = packages.reduce((sum, p) => sum + p.downloadCount, 0)
   const totalPackages = packages.length
   const approvedPackages = packages.filter(p => p.status === 'approved').length
+  const pendingCount = pendingRequests.length
+
+  const channelTrackingData = useMemo(() => {
+    const channelMap = new Map<string, { packages: MaterialPackage[]; downloadCount: number; caseUsage: Map<string, number> }>()
+
+    packages.forEach((pkg) => {
+      pkg.targetChannels.forEach((ch) => {
+        if (!channelMap.has(ch)) {
+          channelMap.set(ch, { packages: [], downloadCount: 0, caseUsage: new Map() })
+        }
+        const data = channelMap.get(ch)!
+        data.packages.push(pkg)
+        data.downloadCount += pkg.downloadCount
+        pkg.caseIds.forEach((cid) => {
+          const current = data.caseUsage.get(cid) || 0
+          data.caseUsage.set(cid, current + 1)
+        })
+      })
+    })
+
+    return Array.from(channelMap.entries()).map(([channel, data]) => {
+      const sortedCases = Array.from(data.caseUsage.entries())
+        .map(([caseId, usageCount]) => {
+          const asset = assets.find((a) => a.id === caseId)
+          return { caseId, usageCount, asset }
+        })
+        .filter((item) => item.asset)
+        .sort((a, b) => b.usageCount - a.usageCount)
+
+      return {
+        channel,
+        packageCount: data.packages.length,
+        downloadCount: data.downloadCount,
+        topCases: sortedCases,
+      }
+    })
+  }, [packages, assets])
 
   const CheckboxItem = ({ checked, onChange, label }: { checked: boolean; onChange: () => void; label: string }) => (
     <label className="flex items-center gap-2 cursor-pointer text-sm text-charcoal/70 hover:text-charcoal select-none">
@@ -242,7 +293,7 @@ export default function Deploy() {
             <h1 className="page-title">投放选用</h1>
             <p className="text-sm text-charcoal/50 mt-1">筛选可公开案例，生成投放素材包</p>
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-4 gap-3">
             <div className="card p-3 flex items-center gap-2">
               <Package className="w-4 h-4 text-rose-gold" />
               <div>
@@ -262,6 +313,13 @@ export default function Deploy() {
               <div>
                 <p className="text-[10px] text-charcoal/50">总下载</p>
                 <p className="text-sm font-semibold text-charcoal">{totalDownloads}</p>
+              </div>
+            </div>
+            <div className="card p-3 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-sky-500" />
+              <div>
+                <p className="text-[10px] text-charcoal/50">待审批</p>
+                <p className="text-sm font-semibold text-charcoal">{pendingCount}</p>
               </div>
             </div>
           </div>
@@ -337,17 +395,46 @@ export default function Deploy() {
               {pendingRequests.map((req) => {
                 const pkg = packages.find(p => p.id === req.packageId)
                 return (
-                  <div key={req.id} className="card p-4 flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-charcoal">{req.packageName}</p>
-                      <p className="text-xs text-charcoal/50">
-                        {req.requestedBy} · {req.requestedAt}
-                        {pkg && <span className="ml-2">· {pkg.caseIds.length} 个案例</span>}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => handleApproveDownload(req)} className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1"><Check size={12} /> 批准</button>
-                      <button onClick={() => updateDownloadRequest(req.id, { status: 'rejected' })} className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1"><X size={12} /> 拒绝</button>
+                  <div key={req.id} className="card p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0 space-y-2">
+                        <div>
+                          <p className="text-sm font-medium text-charcoal">{req.packageName}</p>
+                          <p className="text-xs text-charcoal/50">
+                            {req.requestedBy} · {req.requestedAt}
+                            {pkg && <span className="ml-2">· {pkg.caseIds.length} 个案例</span>}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-charcoal/40 mb-1">包含案例：</p>
+                          <div className="flex flex-wrap gap-1">
+                            {req.caseIds.slice(0, 8).map((cid) => {
+                              const c = assets.find(a => a.id === cid)
+                              return c ? (
+                                <span key={cid} className="text-[10px] bg-cream text-charcoal/60 px-2 py-0.5 rounded-full">
+                                  {c.customerName}
+                                  {c.mediaType === 'video' && <span className="text-rose-gold ml-0.5">▶</span>}
+                                </span>
+                              ) : null
+                            })}
+                            {req.caseIds.length > 8 && (
+                              <span className="text-[10px] text-charcoal/40 px-2 py-0.5">+{req.caseIds.length - 8}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-charcoal/40 mb-1">目标渠道：</p>
+                          <div className="flex flex-wrap gap-1">
+                            {req.targetChannels.map((ch) => (
+                              <span key={ch} className="text-[10px] bg-rose-gold/10 text-rose-gold px-2 py-0.5 rounded-full">{ch}</span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <button onClick={() => handleApproveDownload(req)} className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1"><Check size={12} /> 批准</button>
+                        <button onClick={() => updateDownloadRequest(req.id, { status: 'rejected' })} className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1"><X size={12} /> 拒绝</button>
+                      </div>
                     </div>
                   </div>
                 )
@@ -394,9 +481,76 @@ export default function Deploy() {
                     )}
                   </div>
                 </div>
+                {pkg.status === 'approved' && (
+                  <div className="mt-3 pt-3 border-t border-charcoal/5">
+                    <button
+                      onClick={() => handleRequestDownload(pkg.id)}
+                      disabled={appliedPkgIds.has(pkg.id)}
+                      className={`w-full text-xs py-1.5 rounded-lg flex items-center justify-center gap-1 transition-colors ${
+                        appliedPkgIds.has(pkg.id)
+                          ? 'bg-emerald/10 text-emerald cursor-default'
+                          : 'bg-rose-gold/10 text-rose-gold hover:bg-rose-gold/20'
+                      }`}
+                    >
+                      {appliedPkgIds.has(pkg.id) ? (
+                        <><Check size={12} /> 申请已提交</>
+                      ) : (
+                        <><Download size={12} /> 申请下载</>
+                      )}
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
+        </section>
+
+        <section>
+          <h2 className="section-title flex items-center gap-2 mb-4"><TrendingUp size={18} /> 渠道投放追踪</h2>
+          {channelTrackingData.length === 0 ? (
+            <div className="card p-6 text-center text-charcoal/30 text-sm">暂无渠道投放数据</div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              {channelTrackingData.map((data) => (
+                <div key={data.channel} className="card p-4">
+                  <div className="flex items-start justify-between mb-3">
+                    <div>
+                      <p className="text-sm font-medium text-charcoal">{data.channel}</p>
+                      <p className="text-[10px] text-charcoal/40 mt-0.5">渠道投放统计</p>
+                    </div>
+                    <span className="text-[10px] bg-sky-500/10 text-sky-500 px-2 py-0.5 rounded-full">
+                      活跃渠道
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    <div className="bg-cream/50 rounded-lg p-2">
+                      <p className="text-[10px] text-charcoal/40">素材包数量</p>
+                      <p className="text-base font-semibold text-charcoal">{data.packageCount}</p>
+                    </div>
+                    <div className="bg-cream/50 rounded-lg p-2">
+                      <p className="text-[10px] text-charcoal/40">累计下载</p>
+                      <p className="text-base font-semibold text-charcoal">{data.downloadCount}</p>
+                    </div>
+                  </div>
+                  <div className="pt-3 border-t border-charcoal/5">
+                    <p className="text-[10px] text-charcoal/40 mb-2">使用案例（按使用次数排序）：</p>
+                    <div className="flex flex-wrap gap-1">
+                      {data.topCases.slice(0, 8).map((item) => (
+                        <span key={item.caseId} className="text-[10px] bg-cream text-charcoal/60 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                          {item.asset!.customerName}
+                          {item.asset!.mediaType === 'video' && <span className="text-rose-gold">▶</span>}
+                          <span className="text-rose-gold/70">×{item.usageCount}</span>
+                        </span>
+                      ))}
+                      {data.topCases.length > 8 && (
+                        <span className="text-[10px] text-charcoal/40 px-2 py-0.5">+{data.topCases.length - 8}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       </div>
 

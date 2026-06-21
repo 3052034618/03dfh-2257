@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { useStore } from '@/store/useStore'
 import type { CaseAsset } from '@/types'
 import {
@@ -7,10 +7,10 @@ import {
 } from 'recharts'
 import {
   BarChart3, FileImage, Clock, AlertTriangle, TrendingUp,
-  Users, Eye, ArrowUpRight, Package, Download, Play,
+  Users, Eye, ArrowUpRight, Package, Download, Play, Layers,
 } from 'lucide-react'
 import StatusBadge from '@/components/StatusBadge'
-import { allChannels } from '@/data/mockData'
+import { allChannels, treatmentProjects } from '@/data/mockData'
 
 const TODAY = '2026-06-22'
 const PIE_COLORS = ['#B76E79', '#2E8B6D', '#E8A838', '#6366f1', '#ec4899']
@@ -21,6 +21,8 @@ function daysDiff(dateStr: string, base: string): number {
 
 export default function Dashboard() {
   const { assets, packages, downloadRequests } = useStore()
+  const [selectedChannel, setSelectedChannel] = useState<string | null>(null)
+  const [channelTab, setChannelTab] = useState<'overview' | 'review'>('overview')
 
   const totalCount = assets.length
   const pendingCount = assets.filter((a) => a.reviewStatus === 'pending').length
@@ -89,9 +91,43 @@ export default function Dashboard() {
     count: assets.filter((a) => a.applicableChannels.includes(ch)).length,
   })).sort((a, b) => b.count - a.count)
 
-  const topUsed = [...assets].sort((a, b) => b.usageCount - a.usageCount).slice(0, 5)
+  const topUsed = useMemo(() => {
+    let filtered = assets
+    if (selectedChannel && selectedChannel !== 'all') {
+      filtered = assets.filter(a => a.applicableChannels.includes(selectedChannel))
+    }
+    return [...filtered].sort((a, b) => b.usageCount - a.usageCount).slice(0, 5)
+  }, [assets, selectedChannel])
 
   const topPackages = [...packages].sort((a, b) => b.downloadCount - a.downloadCount).slice(0, 5)
+
+  const channelReviewData = useMemo(() => {
+    return allChannels.map((ch) => {
+      const channelAssets = assets.filter(a => a.applicableChannels.includes(ch))
+      const channelPackages = packages.filter(p => p.targetChannels.includes(ch))
+      const top3ForChannel = [...channelAssets]
+        .sort((a, b) => b.usageCount - a.usageCount)
+        .slice(0, 3)
+      return {
+        name: ch,
+        assetCount: channelAssets.length,
+        packageCount: channelPackages.length,
+        totalDownloads: channelPackages.reduce((s, p) => s + p.downloadCount, 0),
+        totalUsage: channelAssets.reduce((s, a) => s + a.usageCount, 0),
+        topCases: top3ForChannel,
+      }
+    })
+  }, [assets, packages])
+
+  const packageDownloadChartData = useMemo(() => {
+    if (!selectedChannel || selectedChannel === 'all') return []
+    return packages
+      .filter(p => p.targetChannels.includes(selectedChannel))
+      .map(p => ({
+        name: p.name,
+        下载次数: p.downloadCount,
+      }))
+  }, [packages, selectedChannel])
 
   return (
     <div className="p-6 space-y-6">
@@ -135,6 +171,62 @@ export default function Dashboard() {
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="card p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <Layers className="w-4 h-4 text-rose-gold" />
+          <h2 className="section-title">视图切换</h2>
+        </div>
+        <div className="flex gap-3 mb-4">
+          <button
+            onClick={() => setChannelTab('overview')}
+            className={`px-6 py-2.5 rounded-lg text-sm font-medium transition-all ${
+              channelTab === 'overview'
+                ? 'bg-rose-gold text-white shadow-md'
+                : 'bg-cream text-charcoal/70 hover:bg-charcoal/5'
+            }`}
+          >
+            总览
+          </button>
+          <button
+            onClick={() => setChannelTab('review')}
+            className={`px-6 py-2.5 rounded-lg text-sm font-medium transition-all ${
+              channelTab === 'review'
+                ? 'bg-rose-gold text-white shadow-md'
+                : 'bg-cream text-charcoal/70 hover:bg-charcoal/5'
+            }`}
+          >
+            按渠道复盘
+          </button>
+        </div>
+        {channelTab === 'review' && (
+          <div className="flex flex-wrap gap-2 pt-3 border-t border-charcoal/5">
+            <button
+              onClick={() => setSelectedChannel('all')}
+              className={`px-4 py-1.5 rounded-full text-xs font-medium transition-all ${
+                selectedChannel === 'all'
+                  ? 'bg-rose-gold text-white'
+                  : 'bg-cream text-charcoal/60 hover:bg-charcoal/5'
+              }`}
+            >
+              全部渠道
+            </button>
+            {allChannels.map((ch) => (
+              <button
+                key={ch}
+                onClick={() => setSelectedChannel(ch)}
+                className={`px-4 py-1.5 rounded-full text-xs font-medium transition-all ${
+                  selectedChannel === ch
+                    ? 'bg-rose-gold text-white'
+                    : 'bg-cream text-charcoal/60 hover:bg-charcoal/5'
+                }`}
+              >
+                {ch}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-3 gap-6">
@@ -372,6 +464,104 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {channelTab === 'review' && (
+        <div className="card p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <BarChart3 className="w-4 h-4 text-rose-gold" />
+            <h2 className="section-title">投放渠道复盘</h2>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            {channelReviewData.map((data, idx) => (
+              <div key={data.name} className="bg-cream rounded-xl p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-base font-semibold text-charcoal">{data.name}</h3>
+                  <span className="text-[10px] bg-rose-gold/10 text-rose-gold px-2 py-0.5 rounded-full font-medium">
+                    #{idx + 1}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div className="bg-white rounded-lg p-2.5">
+                    <div className="text-xs text-charcoal/50 text-[11px]">可用素材数</div>
+                    <div className="text-lg font-semibold text-charcoal mt-0.5">{data.assetCount}</div>
+                  </div>
+                  <div className="bg-white rounded-lg p-2.5">
+                    <div className="text-xs text-charcoal/50 text-[11px]">素材包数</div>
+                    <div className="text-lg font-semibold text-charcoal mt-0.5">{data.packageCount}</div>
+                  </div>
+                  <div className="bg-white rounded-lg p-2.5">
+                    <div className="text-xs text-charcoal/50 text-[11px]">累计下载数</div>
+                    <div className="text-lg font-semibold text-emerald mt-0.5">{data.totalDownloads}</div>
+                  </div>
+                  <div className="bg-white rounded-lg p-2.5">
+                    <div className="text-xs text-charcoal/50 text-[11px]">累计使用次数</div>
+                    <div className="text-lg font-semibold text-rose-gold mt-0.5">{data.totalUsage}</div>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-charcoal/60 text-[11px] mb-2 font-medium">渠道热门案例 TOP3</div>
+                  {data.topCases.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {data.topCases.map((a, i) => (
+                        <div key={a.id} className="flex items-center justify-between bg-white rounded-lg px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] bg-rose-gold/10 text-rose-gold w-4 h-4 rounded flex items-center justify-center font-semibold">
+                              {i + 1}
+                            </span>
+                            <div>
+                              <div className="text-xs font-medium text-charcoal">{a.customerName}</div>
+                              <div className="text-[10px] text-charcoal/50">{a.treatmentProject}</div>
+                            </div>
+                          </div>
+                          <span className="text-xs font-semibold text-rose-gold">{a.usageCount}次</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center text-charcoal/30 text-xs py-2 bg-white rounded-lg">暂无案例</div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {channelTab === 'review' && (
+        <div className="card p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Download className="w-4 h-4 text-rose-gold" />
+            <h2 className="section-title">下载次数趋势对比</h2>
+            {selectedChannel && selectedChannel !== 'all' && (
+              <span className="ml-2 text-xs text-charcoal/50 bg-rose-gold/10 text-rose-gold px-2 py-0.5 rounded-full">
+                {selectedChannel}
+              </span>
+            )}
+          </div>
+          {selectedChannel && selectedChannel !== 'all' ? (
+            packageDownloadChartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={packageDownloadChartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F2EDE9" />
+                  <XAxis dataKey="name" tick={{ fontSize: 11 }} stroke="#999" />
+                  <YAxis tick={{ fontSize: 12 }} stroke="#999" />
+                  <Tooltip />
+                  <Bar dataKey="下载次数" fill="#B76E79" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="text-center py-12 text-charcoal/30 text-sm">该渠道暂无素材包数据</div>
+            )
+          ) : (
+            <div className="flex items-center justify-center py-16 text-charcoal/40 text-sm">
+              <div className="text-center">
+                <Users className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                <div>请在上方渠道选择器中选择具体渠道，查看该渠道素材包下载次数对比</div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

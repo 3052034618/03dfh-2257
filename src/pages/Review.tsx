@@ -15,6 +15,7 @@ import {
   ChevronDown,
   History,
   Send,
+  MessageSquare,
 } from 'lucide-react'
 
 const TODAY = new Date('2026-06-22')
@@ -50,11 +51,12 @@ function getActionLabel(action: string) {
 }
 
 export default function Review() {
-  const { assets, updateAsset, addBlurLog } = useStore()
+  const { assets, updateAsset, addBlurLog, addComplianceNote } = useStore()
   const [expandedExpired, setExpandedExpired] = useState(false)
   const [expandedBlur, setExpandedBlur] = useState(false)
-  const [expandedRejectedBlur, setExpandedRejectedBlur] = useState(false)
   const [expandedLogs, setExpandedLogs] = useState<string | null>(null)
+  const [expandedNotes, setExpandedNotes] = useState<Record<string, boolean>>({})
+  const [noteInputs, setNoteInputs] = useState<Record<string, string>>({})
   const [rejectReason, setRejectReason] = useState<Record<string, string>>({})
   const [rejectModalOpen, setRejectModalOpen] = useState<string | null>(null)
   const [videoPreview, setVideoPreview] = useState<{ isOpen: boolean; url: string; title: string }>({ isOpen: false, url: '', title: '' })
@@ -71,8 +73,7 @@ export default function Review() {
     (a) => a.authorizationStatus === 'expired' || isExpiringSoon(a.authorizationExpiry)
   )
 
-  const blurredPending = pendingReview.filter((a) => a.isBlurred && a.blurReviewStatus === 'pending')
-  const blurredRejected = assets.filter((a) => a.isBlurred && a.blurReviewStatus === 'rejected')
+  const blurredPending = assets.filter((a) => a.isBlurred && (a.blurReviewStatus === 'pending' || a.blurReviewStatus === 'rejected'))
 
   const totalPending = pendingReview.length
   const approvedToday = assets.filter(
@@ -116,8 +117,6 @@ export default function Review() {
     updateAsset(id, {
       blurReviewStatus: 'rejected',
       reviewStatus: 'pending',
-      isBlurred: false,
-      blurAreas: [],
       blurRejectReason: reason,
     })
     addBlurLog(id, { action: 'reject', operator: '运营主管', reason })
@@ -162,6 +161,51 @@ export default function Review() {
     }
     return <img src={asset.thumbnailUrl} alt="" className={`${size} rounded object-cover`} />
   }
+
+  const handleSubmitNote = (assetId: string) => {
+    const content = (noteInputs[assetId] || '').trim()
+    if (!content) return
+    addComplianceNote(assetId, { author: '审核员', content })
+    setNoteInputs((prev) => ({ ...prev, [assetId]: '' }))
+  }
+
+  const renderNotes = (asset: CaseAsset) => (
+    <div className="space-y-2 mt-3 pt-3 border-t border-cream-dark/30">
+      <div className="flex items-center gap-2 text-xs text-charcoal/50">
+        <MessageSquare className="w-3 h-3" />
+        <span>合规协作备注</span>
+      </div>
+      <div className="space-y-2">
+        {(asset.complianceNotes || []).slice().reverse().map((note) => (
+          <div key={note.id} className="bg-cream-dark/20 rounded-lg p-2.5">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-xs font-medium text-charcoal/80">{note.author}</span>
+              <span className="text-xs text-charcoal/40 font-mono">{formatTime(note.timestamp)}</span>
+            </div>
+            <p className="text-xs text-charcoal/70 whitespace-pre-wrap break-words">{note.content}</p>
+          </div>
+        ))}
+        {(!asset.complianceNotes || asset.complianceNotes.length === 0) && (
+          <div className="text-xs text-charcoal/40">暂无协作备注</div>
+        )}
+      </div>
+      <div className="flex gap-2 mt-2">
+        <textarea
+          className="input-field flex-1 min-h-[60px] resize-y text-xs"
+          placeholder="输入协作备注内容..."
+          value={noteInputs[asset.id] || ''}
+          onChange={(e) => setNoteInputs((prev) => ({ ...prev, [asset.id]: e.target.value }))}
+        />
+        <button
+          onClick={() => handleSubmitNote(asset.id)}
+          disabled={!(noteInputs[asset.id] || '').trim()}
+          className="btn-primary self-end flex items-center gap-1 px-3 py-1.5 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <Send className="w-3 h-3" /> 提交
+        </button>
+      </div>
+    </div>
+  )
 
   const renderLogs = (asset: CaseAsset) => (
     <div className="space-y-2 mt-3 pt-3 border-t border-cream-dark/30">
@@ -311,104 +355,95 @@ export default function Review() {
           </button>
           {expandedBlur && (
             <div className="card mt-3 space-y-3 p-4">
-              {blurredPending.map((a) => (
-                <div key={a.id} className="border-b border-cream-dark/30 pb-3 last:border-0 last:pb-0">
-                  <div className="flex items-center gap-4">
-                    <div className="relative">
-                      {renderMedia(a)}
-                      <div className="absolute -top-1 -right-1 bg-amber-warn rounded-full p-0.5">
-                        <EyeOff className="w-3 h-3 text-white" />
+              {blurredPending.map((a) => {
+                const isRejected = a.blurReviewStatus === 'rejected'
+                return (
+                  <div
+                    key={a.id}
+                    className={`border-b border-cream-dark/30 pb-3 last:border-0 last:pb-0 rounded-lg ${isRejected ? 'bg-rose-gold/5 border border-rose-gold/20 p-3 mb-2' : ''}`}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="relative">
+                        {renderMedia(a)}
+                        <div className={`absolute -top-1 -right-1 ${isRejected ? 'bg-rose-gold' : 'bg-amber-warn'} rounded-full p-0.5`}>
+                          {isRejected ? <X className="w-3 h-3 text-white" /> : <EyeOff className="w-3 h-3 text-white" />}
+                        </div>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-medium text-charcoal text-sm">
+                            {a.customerName} - {a.treatmentProject}
+                            {a.mediaType === 'video' && <span className="ml-2 text-xs bg-rose-gold/10 text-rose-gold px-2 py-0.5 rounded-full">视频</span>}
+                          </p>
+                          {isRejected ? (
+                            <span className="text-xs bg-rose-gold/10 text-rose-gold px-2 py-0.5 rounded-full border border-rose-gold/20">
+                              打码已退回
+                            </span>
+                          ) : (
+                            <span className="text-xs bg-amber-warn/10 text-amber-warn px-2 py-0.5 rounded-full border border-amber-warn/20">
+                              打码待确认
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-charcoal/50 mt-0.5">
+                          {a.phase === 'pre-op' ? '术前' : '术后'} · 打码区域: {a.blurAreas.length}处
+                        </p>
+                        {isRejected && (
+                          <p className="text-xs text-rose-gold mt-1">
+                            退回原因：{a.blurRejectReason || '打码不符合规范，请重新处理后再次提交'}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setExpandedNotes((prev) => ({ ...prev, [a.id]: !prev[a.id] }))}
+                          className={`btn-ghost flex items-center gap-1 px-2 py-1 text-xs ${expandedNotes[a.id] ? 'bg-cream-dark/20' : ''}`}
+                          title="合规协作备注"
+                        >
+                          <MessageSquare className="w-3 h-3" />
+                          {(a.complianceNotes?.length ?? 0) > 0 && (
+                            <span className="bg-amber-warn text-white text-[10px] px-1 rounded-full">
+                              {a.complianceNotes.length}
+                            </span>
+                          )}
+                        </button>
+                        <button
+                          onClick={() => setExpandedLogs(expandedLogs === a.id ? null : a.id)}
+                          className="btn-ghost flex items-center gap-1 px-2 py-1 text-xs"
+                          title="查看打码台账"
+                        >
+                          <History className="w-3 h-3" />
+                        </button>
+                        {isRejected ? (
+                          <button
+                            onClick={() => handleBlurResubmit(a.id)}
+                            className="btn-secondary flex items-center gap-1 px-3 py-1 text-xs"
+                          >
+                            <RefreshCw className="w-3 h-3" /> 重新提交打码
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => handleBlurApprove(a.id)}
+                              className="btn-primary flex items-center gap-1 px-3 py-1 text-xs"
+                            >
+                              <Check className="w-3 h-3" /> 确认
+                            </button>
+                            <button
+                              onClick={() => openRejectModal(a.id)}
+                              className="btn-ghost flex items-center gap-1 px-3 py-1 text-xs"
+                            >
+                              <X className="w-3 h-3" /> 退回
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-charcoal text-sm">
-                        {a.customerName} - {a.treatmentProject}
-                        {a.mediaType === 'video' && <span className="ml-2 text-xs bg-rose-gold/10 text-rose-gold px-2 py-0.5 rounded-full">视频</span>}
-                      </p>
-                      <p className="text-xs text-charcoal/50">
-                        {a.phase === 'pre-op' ? '术前' : '术后'} · 打码区域: {a.blurAreas.length}处
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setExpandedLogs(expandedLogs === a.id ? null : a.id)}
-                        className="btn-ghost flex items-center gap-1 px-2 py-1 text-xs"
-                        title="查看打码台账"
-                      >
-                        <History className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={() => handleBlurApprove(a.id)}
-                        className="btn-primary flex items-center gap-1 px-3 py-1 text-xs"
-                      >
-                        <Check className="w-3 h-3" /> 确认
-                      </button>
-                      <button
-                        onClick={() => openRejectModal(a.id)}
-                        className="btn-ghost flex items-center gap-1 px-3 py-1 text-xs"
-                      >
-                        <X className="w-3 h-3" /> 退回
-                      </button>
-                    </div>
+                    {expandedLogs === a.id && renderLogs(a)}
+                    {expandedNotes[a.id] && renderNotes(a)}
                   </div>
-                  {expandedLogs === a.id && renderLogs(a)}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {blurredRejected.length > 0 && (
-        <div className="mt-6">
-          <button
-            onClick={() => setExpandedRejectedBlur(!expandedRejectedBlur)}
-            className="section-title flex items-center gap-2 cursor-pointer"
-          >
-            <X className="w-5 h-5 text-rose-gold" />
-            打码已退回
-            <span className="badge-rejected text-xs">{blurredRejected.length}</span>
-            <ChevronDown className={`w-4 h-4 transition-transform ${expandedRejectedBlur ? 'rotate-180' : ''}`} />
-          </button>
-          {expandedRejectedBlur && (
-            <div className="card mt-3 space-y-3 p-4 bg-rose-gold/5">
-              {blurredRejected.map((a) => (
-                <div key={a.id} className="border-b border-cream-dark/30 pb-3 last:border-0 last:pb-0">
-                  <div className="flex items-center gap-4">
-                    <div className="relative">
-                      {renderMedia(a, 'w-12 h-12')}
-                      <div className="absolute -top-1 -right-1 bg-rose-gold rounded-full p-0.5">
-                        <X className="w-3 h-3 text-white" />
-                      </div>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-charcoal text-sm">
-                        {a.customerName} - {a.treatmentProject}
-                        {a.mediaType === 'video' && <span className="ml-2 text-xs bg-rose-gold/10 text-rose-gold px-2 py-0.5 rounded-full">视频</span>}
-                      </p>
-                      <p className="text-xs text-rose-gold">
-                        退回原因：{a.blurRejectReason || '打码不符合规范，请重新处理后再次提交'}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setExpandedLogs(expandedLogs === a.id ? null : a.id)}
-                        className="btn-ghost flex items-center gap-1 px-2 py-1 text-xs"
-                        title="查看打码台账"
-                      >
-                        <History className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={() => handleBlurResubmit(a.id)}
-                        className="btn-secondary flex items-center gap-1 px-3 py-1 text-xs"
-                      >
-                        <RefreshCw className="w-3 h-3" /> 重新提交打码
-                      </button>
-                    </div>
-                  </div>
-                  {expandedLogs === a.id && renderLogs(a)}
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>

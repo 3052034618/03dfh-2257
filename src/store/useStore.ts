@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { CaseAsset, MaterialPackage, DownloadRequest } from '@/types'
+import type { CaseAsset, MaterialPackage, DownloadRequest, ComplianceNote } from '@/types'
 import { caseAssets as initialAssets, materialPackages as initialPackages, downloadRequests as initialRequests } from '@/data/mockData'
 
 const STORAGE_KEY = 'aesthecase-store-v1'
@@ -65,6 +65,9 @@ interface AppState {
   incrementUsageCount: (caseId: string, amount?: number) => void
   incrementPackageUsage: (caseIds: string[], amount?: number) => void
   addBlurLog: (caseId: string, log: Omit<import('@/types').BlurLog, 'id' | 'timestamp'>) => void
+  addComplianceNote: (caseId: string, note: Omit<ComplianceNote, 'id' | 'timestamp'>) => void
+  requestDownloadFromPackage: (packageId: string, requestedBy: string) => string
+  approveDownloadRequestExtended: (requestId: string, approvedBy: string) => void
   resetStore: () => void
 }
 
@@ -194,6 +197,76 @@ export const useStore = create<AppState>((set) => {
           ...state,
           assets: state.assets.map((a) =>
             a.id === caseId ? { ...a, blurLogs: [...(a.blurLogs || []), newLog] } : a
+          ),
+        }
+        persist(next)
+        return next
+      }),
+
+    addComplianceNote: (caseId, note) =>
+      set((state) => {
+        const newNote: ComplianceNote = {
+          ...note,
+          id: 'CN' + Date.now() + Math.random().toString(36).slice(2, 6),
+          timestamp: new Date().toISOString(),
+        }
+        const next = {
+          ...state,
+          assets: state.assets.map((a) =>
+            a.id === caseId ? { ...a, complianceNotes: [...(a.complianceNotes || []), newNote] } : a
+          ),
+        }
+        persist(next)
+        return next
+      }),
+
+    requestDownloadFromPackage: (packageId, requestedBy) => {
+      let newRequestId = ''
+      set((state) => {
+        const pkg = state.packages.find((p) => p.id === packageId)
+        if (!pkg) return state
+        newRequestId = 'DL' + Date.now() + Math.random().toString(36).slice(2, 6)
+        const newRequest: DownloadRequest = {
+          id: newRequestId,
+          packageId: pkg.id,
+          packageName: pkg.name,
+          requestedBy,
+          status: 'pending',
+          requestedAt: new Date().toISOString(),
+          caseIds: pkg.caseIds,
+          targetChannels: pkg.targetChannels,
+        }
+        const next = {
+          ...state,
+          downloadRequests: [...state.downloadRequests, newRequest],
+        }
+        persist(next)
+        return next
+      })
+      return newRequestId
+    },
+
+    approveDownloadRequestExtended: (requestId, approvedBy) =>
+      set((state) => {
+        const request = state.downloadRequests.find((r) => r.id === requestId)
+        if (!request || request.status === 'approved') return state
+        const next: PersistedState & Pick<AppState, keyof PersistedState> = {
+          ...state,
+          downloadRequests: state.downloadRequests.map((r) =>
+            r.id === requestId
+              ? {
+                  ...r,
+                  status: 'approved' as const,
+                  approvedAt: new Date().toISOString(),
+                  approvedBy,
+                }
+              : r
+          ),
+          packages: state.packages.map((p) =>
+            p.id === request.packageId ? { ...p, downloadCount: p.downloadCount + 1 } : p
+          ),
+          assets: state.assets.map((a) =>
+            request.caseIds.includes(a.id) ? { ...a, usageCount: a.usageCount + 1 } : a
           ),
         }
         persist(next)

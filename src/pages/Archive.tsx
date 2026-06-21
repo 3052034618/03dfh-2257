@@ -194,7 +194,7 @@ export default function Archive() {
     ? getGroup(modal.asset).filter(a => a.phase === 'post-op').sort((a, b) => a.recoveryDays - b.recoveryDays)
     : []
 
-  const renderMedia = (asset: CaseAsset, onClick?: () => void) => {
+  const renderMedia = (asset: CaseAsset, batchMode: boolean, onClick?: () => void) => {
     if (asset.mediaType === 'video') {
       return (
         <div
@@ -220,6 +220,7 @@ export default function Archive() {
               </span>
             )}
           </div>
+          {!batchMode && <div className="absolute top-2 right-2"><StatusBadge status={asset.authorizationStatus} /></div>}
         </div>
       )
     }
@@ -239,7 +240,7 @@ export default function Archive() {
             </span>
           )}
         </div>
-        <div className="absolute top-2 right-2"><StatusBadge status={asset.authorizationStatus} /></div>
+        {!batchMode && <div className="absolute top-2 right-2"><StatusBadge status={asset.authorizationStatus} /></div>}
       </div>
     )
   }
@@ -383,30 +384,34 @@ export default function Archive() {
 
       <div className="grid grid-cols-3 gap-5">
         {filtered.map(asset => (
-          <div key={asset.id} className={`card overflow-hidden transition-all ${batchMode && selectedIds.has(asset.id) ? 'ring-2 ring-rose-gold' : ''}`}>
+          <div key={asset.id} className={`card overflow-hidden transition-all relative ${batchMode && selectedIds.has(asset.id) ? 'ring-2 ring-rose-gold' : ''}`}>
             {batchMode && (
               <button
                 onClick={(e) => { e.stopPropagation(); toggleSelect(asset.id) }}
-                className="absolute top-3 right-3 z-10 w-6 h-6 flex items-center justify-center rounded-md bg-white/90 hover:bg-white shadow-sm"
+                className="absolute top-2 right-2 z-20 w-7 h-7 flex items-center justify-center rounded-lg bg-white shadow-md hover:shadow-lg hover:scale-105 transition-all border border-charcoal/10 active:scale-95"
               >
                 {selectedIds.has(asset.id) ? (
                   <CheckSquare className="w-5 h-5 text-rose-gold" />
                 ) : (
-                  <Square className="w-5 h-5 text-charcoal/30" />
+                  <Square className="w-5 h-5 text-charcoal/40 hover:text-charcoal/60" />
                 )}
               </button>
             )}
-            {renderMedia(asset)}
-            {asset.mediaType === 'photo' && (
-              <div className="absolute top-2 right-2"><StatusBadge status={asset.authorizationStatus} /></div>
-            )}
+            {renderMedia(asset, batchMode)}
             <div className="p-4 space-y-2.5">
               <div className="flex items-center justify-between">
                 <div>
                   <span className="font-medium text-charcoal text-sm">{asset.customerName}</span>
                   <span className="text-charcoal/40 text-xs ml-1.5">{asset.customerAgeGroup}岁</span>
                 </div>
-                <span className="text-charcoal/30 text-xs inline-flex items-center gap-1"><Eye size={12} />{asset.usageCount}</span>
+                <div className="flex items-center gap-2">
+                  {batchMode && selectedIds.has(asset.id) && (
+                    <span className="text-[10px] text-rose-gold font-medium inline-flex items-center gap-0.5 bg-rose-gold/10 px-1.5 py-0.5 rounded">
+                      <CheckSquare className="w-3 h-3" />已选
+                    </span>
+                  )}
+                  <span className="text-charcoal/30 text-xs inline-flex items-center gap-1"><Eye size={12} />{asset.usageCount}</span>
+                </div>
               </div>
               <p className="text-xs text-charcoal/60">{asset.treatmentProject} · {asset.doctorName}</p>
               <div className="flex flex-wrap gap-1">
