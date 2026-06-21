@@ -97,6 +97,10 @@ export interface DownloadRequest {
   targetChannels: string[]
   approvedAt?: string
   approvedBy?: string
+  channel?: string
+  placementDate?: string
+  rejectReason?: string
+  operator?: string
 }
 
 export type AuthStatus = CaseAsset['authorizationStatus']

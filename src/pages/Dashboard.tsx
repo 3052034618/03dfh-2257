@@ -86,48 +86,141 @@ export default function Dashboard() {
     .filter((a) => a.daysLeft >= -30 && a.daysLeft <= 30)
     .sort((a, b) => a.daysLeft - b.daysLeft)
 
-  const channelData = allChannels.map((ch) => ({
-    name: ch,
-    count: assets.filter((a) => a.applicableChannels.includes(ch)).length,
-  })).sort((a, b) => b.count - a.count)
+  const approvedRequests = useMemo(() => {
+    return downloadRequests.filter(r => r.status === 'approved')
+  }, [downloadRequests])
+
+  const channelData = useMemo(() => {
+    const channelCountMap = new Map<string, number>()
+    allChannels.forEach(ch => channelCountMap.set(ch, 0))
+    
+    approvedRequests.forEach(req => {
+      const channels = req.targetChannels || []
+      channels.forEach(ch => {
+        if (channelCountMap.has(ch)) {
+          channelCountMap.set(ch, channelCountMap.get(ch)! + 1)
+        }
+      })
+    })
+
+    return allChannels.map(ch => ({
+      name: ch,
+      count: channelCountMap.get(ch) || 0,
+    })).sort((a, b) => b.count - a.count)
+  }, [approvedRequests])
 
   const topUsed = useMemo(() => {
-    let filtered = assets
-    if (selectedChannel && selectedChannel !== 'all') {
-      filtered = assets.filter(a => a.applicableChannels.includes(selectedChannel))
-    }
-    return [...filtered].sort((a, b) => b.usageCount - a.usageCount).slice(0, 5)
-  }, [assets, selectedChannel])
+    if (channelTab === 'review' && selectedChannel && selectedChannel !== 'all') {
+      const caseCountMap = new Map<string, number>()
+      
+      const channelApprovedRequests = approvedRequests.filter(req => 
+        req.targetChannels?.includes(selectedChannel)
+      )
+      
+      channelApprovedRequests.forEach(req => {
+        req.caseIds.forEach(caseId => {
+          caseCountMap.set(caseId, (caseCountMap.get(caseId) || 0) + 1)
+        })
+      })
 
-  const topPackages = [...packages].sort((a, b) => b.downloadCount - a.downloadCount).slice(0, 5)
+      const sortedCases = [...caseCountMap.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([caseId, count]) => {
+          const asset = assets.find(a => a.id === caseId)
+          return asset ? { ...asset, channelUsageCount: count } : null
+        })
+        .filter(Boolean) as (CaseAsset & { channelUsageCount: number })[]
+      
+      return sortedCases
+    }
+    
+    return [...assets].sort((a, b) => b.usageCount - a.usageCount).slice(0, 5)
+  }, [assets, selectedChannel, channelTab, approvedRequests])
+
+  const topPackages = useMemo(() => {
+    if (channelTab === 'review' && selectedChannel && selectedChannel !== 'all') {
+      const packageCountMap = new Map<string, number>()
+      
+      const channelApprovedRequests = approvedRequests.filter(req => 
+        req.targetChannels?.includes(selectedChannel)
+      )
+      
+      channelApprovedRequests.forEach(req => {
+        packageCountMap.set(req.packageId, (packageCountMap.get(req.packageId) || 0) + 1)
+      })
+
+      const sortedPackages = [...packageCountMap.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([pkgId, count]) => {
+          const pkg = packages.find(p => p.id === pkgId)
+          return pkg ? { ...pkg, channelDownloadCount: count } : null
+        })
+        .filter(Boolean) as (typeof packages[0] & { channelDownloadCount: number })[]
+      
+      return sortedPackages
+    }
+    
+    return [...packages].sort((a, b) => b.downloadCount - a.downloadCount).slice(0, 5)
+  }, [packages, selectedChannel, channelTab, approvedRequests])
 
   const channelReviewData = useMemo(() => {
     return allChannels.map((ch) => {
-      const channelAssets = assets.filter(a => a.applicableChannels.includes(ch))
-      const channelPackages = packages.filter(p => p.targetChannels.includes(ch))
-      const top3ForChannel = [...channelAssets]
-        .sort((a, b) => b.usageCount - a.usageCount)
+      const channelApprovedRequests = approvedRequests.filter(req => 
+        req.targetChannels?.includes(ch)
+      )
+      
+      const placementCount = channelApprovedRequests.length
+      
+      const uniquePackageIds = new Set(channelApprovedRequests.map(req => req.packageId))
+      const packageCount = uniquePackageIds.size
+      
+      const caseCountMap = new Map<string, number>()
+      channelApprovedRequests.forEach(req => {
+        req.caseIds.forEach(caseId => {
+          caseCountMap.set(caseId, (caseCountMap.get(caseId) || 0) + 1)
+        })
+      })
+      const totalCaseUsage = [...caseCountMap.values()].reduce((sum, count) => sum + count, 0)
+      
+      const top3CaseIds = [...caseCountMap.entries()]
+        .sort((a, b) => b[1] - a[1])
         .slice(0, 3)
+      
+      const topCases = top3CaseIds.map(([caseId, count]) => {
+        const asset = assets.find(a => a.id === caseId)
+        return asset ? { ...asset, channelUsageCount: count } : null
+      }).filter(Boolean) as (CaseAsset & { channelUsageCount: number })[]
+
       return {
         name: ch,
-        assetCount: channelAssets.length,
-        packageCount: channelPackages.length,
-        totalDownloads: channelPackages.reduce((s, p) => s + p.downloadCount, 0),
-        totalUsage: channelAssets.reduce((s, a) => s + a.usageCount, 0),
-        topCases: top3ForChannel,
+        投放次数: placementCount,
+        素材包数: packageCount,
+        案例使用次数: totalCaseUsage,
+        topCases,
       }
     })
-  }, [assets, packages])
+  }, [assets, approvedRequests])
 
   const packageDownloadChartData = useMemo(() => {
     if (!selectedChannel || selectedChannel === 'all') return []
-    return packages
-      .filter(p => p.targetChannels.includes(selectedChannel))
-      .map(p => ({
-        name: p.name,
-        下载次数: p.downloadCount,
-      }))
-  }, [packages, selectedChannel])
+    
+    const packageCountMap = new Map<string, number>()
+    
+    const channelApprovedRequests = approvedRequests.filter(req => 
+      req.targetChannels?.includes(selectedChannel)
+    )
+    
+    channelApprovedRequests.forEach(req => {
+      packageCountMap.set(req.packageName, (packageCountMap.get(req.packageName) || 0) + 1)
+    })
+
+    return [...packageCountMap.entries()].map(([name, count]) => ({
+      name,
+      投放次数: count,
+    }))
+  }, [approvedRequests, selectedChannel])
 
   return (
     <div className="p-6 space-y-6">
@@ -366,7 +459,7 @@ export default function Dashboard() {
         <div className="card p-5">
           <div className="flex items-center gap-2 mb-4">
             <Users className="w-4 h-4 text-rose-gold" />
-            <h2 className="section-title">渠道部署概览</h2>
+            <h2 className="section-title">渠道投放次数</h2>
           </div>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={channelData} layout="vertical">
@@ -413,7 +506,11 @@ export default function Dashboard() {
                       <span className="text-[10px] bg-charcoal/5 text-charcoal/50 px-1.5 py-0.5 rounded">图片</span>
                     )}
                   </td>
-                  <td className="py-2.5 text-center font-medium text-rose-gold">{a.usageCount}</td>
+                  <td className="py-2.5 text-center font-medium text-rose-gold">
+                    {channelTab === 'review' && selectedChannel && selectedChannel !== 'all' 
+                      ? (a as any).channelUsageCount ?? 0
+                      : a.usageCount}
+                  </td>
                   <td className="py-2.5 text-center">
                     <StatusBadge status={a.authorizationStatus} />
                   </td>
@@ -445,7 +542,9 @@ export default function Dashboard() {
               </div>
               <div className="flex items-center justify-center gap-1 text-rose-gold font-semibold">
                 <Download className="w-3 h-3" />
-                {pkg.downloadCount}
+                {channelTab === 'review' && selectedChannel && selectedChannel !== 'all'
+                  ? (pkg as any).channelDownloadCount ?? 0
+                  : pkg.downloadCount}
               </div>
               <div className="flex flex-wrap gap-1 mt-2 justify-center">
                 {pkg.targetChannels.slice(0, 2).map(ch => (
@@ -482,20 +581,20 @@ export default function Dashboard() {
                 </div>
                 <div className="grid grid-cols-2 gap-3 mb-4">
                   <div className="bg-white rounded-lg p-2.5">
-                    <div className="text-xs text-charcoal/50 text-[11px]">可用素材数</div>
-                    <div className="text-lg font-semibold text-charcoal mt-0.5">{data.assetCount}</div>
+                    <div className="text-xs text-charcoal/50 text-[11px]">投放次数</div>
+                    <div className="text-lg font-semibold text-emerald mt-0.5">{data.投放次数}</div>
                   </div>
                   <div className="bg-white rounded-lg p-2.5">
                     <div className="text-xs text-charcoal/50 text-[11px]">素材包数</div>
-                    <div className="text-lg font-semibold text-charcoal mt-0.5">{data.packageCount}</div>
+                    <div className="text-lg font-semibold text-charcoal mt-0.5">{data.素材包数}</div>
                   </div>
                   <div className="bg-white rounded-lg p-2.5">
-                    <div className="text-xs text-charcoal/50 text-[11px]">累计下载数</div>
-                    <div className="text-lg font-semibold text-emerald mt-0.5">{data.totalDownloads}</div>
+                    <div className="text-xs text-charcoal/50 text-[11px]">案例使用次数</div>
+                    <div className="text-lg font-semibold text-rose-gold mt-0.5">{data.案例使用次数}</div>
                   </div>
                   <div className="bg-white rounded-lg p-2.5">
-                    <div className="text-xs text-charcoal/50 text-[11px]">累计使用次数</div>
-                    <div className="text-lg font-semibold text-rose-gold mt-0.5">{data.totalUsage}</div>
+                    <div className="text-xs text-charcoal/50 text-[11px]">热门案例数</div>
+                    <div className="text-lg font-semibold text-charcoal mt-0.5">{data.topCases.length}</div>
                   </div>
                 </div>
                 <div>
@@ -513,12 +612,12 @@ export default function Dashboard() {
                               <div className="text-[10px] text-charcoal/50">{a.treatmentProject}</div>
                             </div>
                           </div>
-                          <span className="text-xs font-semibold text-rose-gold">{a.usageCount}次</span>
+                          <span className="text-xs font-semibold text-rose-gold">{(a as any).channelUsageCount ?? 0}次</span>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <div className="text-center text-charcoal/30 text-xs py-2 bg-white rounded-lg">暂无案例</div>
+                    <div className="text-center text-charcoal/30 text-xs py-2 bg-white rounded-lg">暂无投放记录</div>
                   )}
                 </div>
               </div>
@@ -531,7 +630,7 @@ export default function Dashboard() {
         <div className="card p-5">
           <div className="flex items-center gap-2 mb-4">
             <Download className="w-4 h-4 text-rose-gold" />
-            <h2 className="section-title">下载次数趋势对比</h2>
+            <h2 className="section-title">渠道内素材包投放排行</h2>
             {selectedChannel && selectedChannel !== 'all' && (
               <span className="ml-2 text-xs text-charcoal/50 bg-rose-gold/10 text-rose-gold px-2 py-0.5 rounded-full">
                 {selectedChannel}
@@ -546,17 +645,17 @@ export default function Dashboard() {
                   <XAxis dataKey="name" tick={{ fontSize: 11 }} stroke="#999" />
                   <YAxis tick={{ fontSize: 12 }} stroke="#999" />
                   <Tooltip />
-                  <Bar dataKey="下载次数" fill="#B76E79" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="投放次数" fill="#B76E79" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="text-center py-12 text-charcoal/30 text-sm">该渠道暂无素材包数据</div>
+              <div className="text-center py-12 text-charcoal/30 text-sm">该渠道暂无投放数据</div>
             )
           ) : (
             <div className="flex items-center justify-center py-16 text-charcoal/40 text-sm">
               <div className="text-center">
                 <Users className="w-10 h-10 mx-auto mb-3 opacity-30" />
-                <div>请在上方渠道选择器中选择具体渠道，查看该渠道素材包下载次数对比</div>
+                <div>请在上方渠道选择器中选择具体渠道，查看该渠道素材包投放次数对比</div>
               </div>
             </div>
           )}

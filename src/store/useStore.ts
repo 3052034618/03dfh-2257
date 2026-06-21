@@ -67,6 +67,8 @@ interface AppState {
   addBlurLog: (caseId: string, log: Omit<import('@/types').BlurLog, 'id' | 'timestamp'>) => void
   addComplianceNote: (caseId: string, note: Omit<ComplianceNote, 'id' | 'timestamp'>) => void
   requestDownloadFromPackage: (packageId: string, requestedBy: string) => string
+  createDownloadRequest: (data: { packageId: string; packageName: string; caseIds: string[]; requestedBy: string; channel?: string; placementDate?: string; targetChannels?: string[] }) => string
+  rejectDownloadRequest: (requestId: string, rejectReason: string, operator: string) => void
   approveDownloadRequestExtended: (requestId: string, approvedBy: string) => void
   resetStore: () => void
 }
@@ -246,10 +248,61 @@ export const useStore = create<AppState>((set) => {
       return newRequestId
     },
 
+    createDownloadRequest: (data) => {
+      let newRequestId = ''
+      set((state) => {
+        const pkg = state.packages.find((p) => p.id === data.packageId)
+        newRequestId = 'DL' + Date.now() + Math.random().toString(36).slice(2, 6)
+        const newRequest: DownloadRequest = {
+          id: newRequestId,
+          packageId: data.packageId,
+          packageName: data.packageName || pkg?.name || '',
+          requestedBy: data.requestedBy,
+          status: 'pending',
+          requestedAt: new Date().toISOString(),
+          caseIds: data.caseIds.length > 0 ? data.caseIds : (pkg?.caseIds || []),
+          targetChannels: data.targetChannels || (pkg?.targetChannels || []),
+          channel: data.channel,
+          placementDate: data.placementDate,
+        }
+        const next = {
+          ...state,
+          downloadRequests: [...state.downloadRequests, newRequest],
+        }
+        persist(next)
+        return next
+      })
+      return newRequestId
+    },
+
+    rejectDownloadRequest: (requestId, reason, operator) =>
+      set((state) => {
+        const request = state.downloadRequests.find((r) => r.id === requestId)
+        if (!request || request.status !== 'pending') return state
+        const next = {
+          ...state,
+          downloadRequests: state.downloadRequests.map((r) =>
+            r.id === requestId
+              ? {
+                  ...r,
+                  status: 'rejected' as const,
+                  rejectReason: reason,
+                  operator,
+                }
+              : r
+          ),
+        }
+        persist(next)
+        return next
+      }),
+
     approveDownloadRequestExtended: (requestId, approvedBy) =>
       set((state) => {
         const request = state.downloadRequests.find((r) => r.id === requestId)
         if (!request || request.status === 'approved') return state
+        const pkg = state.packages.find((p) => p.id === request.packageId)
+        const finalCaseIds = request.caseIds.length > 0 ? request.caseIds : (pkg?.caseIds || [])
+        const finalChannel = request.channel || (pkg?.targetChannels?.[0] || '')
         const next: PersistedState & Pick<AppState, keyof PersistedState> = {
           ...state,
           downloadRequests: state.downloadRequests.map((r) =>
@@ -259,6 +312,9 @@ export const useStore = create<AppState>((set) => {
                   status: 'approved' as const,
                   approvedAt: new Date().toISOString(),
                   approvedBy,
+                  caseIds: finalCaseIds,
+                  channel: finalChannel,
+                  operator: approvedBy,
                 }
               : r
           ),
@@ -266,7 +322,7 @@ export const useStore = create<AppState>((set) => {
             p.id === request.packageId ? { ...p, downloadCount: p.downloadCount + 1 } : p
           ),
           assets: state.assets.map((a) =>
-            request.caseIds.includes(a.id) ? { ...a, usageCount: a.usageCount + 1 } : a
+            finalCaseIds.includes(a.id) ? { ...a, usageCount: a.usageCount + 1 } : a
           ),
         }
         persist(next)

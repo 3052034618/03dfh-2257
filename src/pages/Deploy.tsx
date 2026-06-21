@@ -10,7 +10,7 @@ import { allChannels, treatmentProjects } from '@/data/mockData'
 const ageGroups = ['18-30', '31-40', '41-50']
 
 export default function Deploy() {
-  const { assets, packages, downloadRequests, addPackage, updatePackage, updateDownloadRequest, incrementPackageUsage, requestDownloadFromPackage, approveDownloadRequestExtended } = useStore()
+  const { assets, packages, downloadRequests, addPackage, updatePackage, updateDownloadRequest, createDownloadRequest, rejectDownloadRequest, approveDownloadRequestExtended } = useStore()
   const [filterOpen, setFilterOpen] = useState(true)
   const [selectedProjects, setSelectedProjects] = useState<string[]>([])
   const [selectedAgeGroups, setSelectedAgeGroups] = useState<string[]>([])
@@ -27,6 +27,15 @@ export default function Deploy() {
   const [searchText, setSearchText] = useState('')
   const [videoPreview, setVideoPreview] = useState<{ isOpen: boolean; url: string; title: string }>({ isOpen: false, url: '', title: '' })
   const [appliedPkgIds, setAppliedPkgIds] = useState<Set<string>>(new Set())
+  const [postCreateRequestModal, setPostCreateRequestModal] = useState<{ open: boolean; packageId: string; packageName: string; targetChannels: string[]; caseIds: string[] }>({ open: false, packageId: '', packageName: '', targetChannels: [], caseIds: [] })
+  const [downloadRequestModal, setDownloadRequestModal] = useState<{ open: boolean; packageId: string; packageName: string; targetChannels: string[]; caseIds: string[] }>({ open: false, packageId: '', packageName: '', targetChannels: [], caseIds: [] })
+  const [reqChannel, setReqChannel] = useState('')
+  const [reqPlacementDate, setReqPlacementDate] = useState(new Date().toISOString().slice(0, 10))
+  const [reqApplicant, setReqApplicant] = useState('当前用户')
+  const [approvalTab, setApprovalTab] = useState<'pending' | 'all'>('pending')
+  const [rejectModal, setRejectModal] = useState<{ open: boolean; requestId: string }>({ open: false, requestId: '' })
+  const [rejectReason, setRejectReason] = useState('')
+  const [successToast, setSuccessToast] = useState('')
 
   const toggleFilterItem = (arr: string[], setArr: (v: string[]) => void, item: string) => {
     setArr(arr.includes(item) ? arr.filter((i) => i !== item) : [...arr, item])
@@ -78,8 +87,9 @@ export default function Deploy() {
 
   const handleCreatePackage = () => {
     if (!pkgName.trim() || !pkgChannels.length) return
+    const pkgId = 'PKG' + Date.now()
     const pkg: MaterialPackage = {
-      id: 'PKG' + Date.now(),
+      id: pkgId,
       name: pkgName.trim(),
       caseIds: Array.from(selectedIds),
       createdBy: '当前用户',
@@ -89,57 +99,114 @@ export default function Deploy() {
       downloadCount: 0,
     }
     addPackage(pkg)
-    incrementPackageUsage(Array.from(selectedIds), 1)
     setSelectedIds(new Set())
     setShowPkgModal(false)
     setPkgName('')
     setPkgChannels([])
+    setPostCreateRequestModal({
+      open: true,
+      packageId: pkgId,
+      packageName: pkg.name,
+      targetChannels: pkgChannels,
+      caseIds: pkg.caseIds,
+    })
+    if (pkgChannels.length > 0) {
+      setReqChannel(pkgChannels[0])
+    }
   }
 
   const handleApproveDownload = (req: typeof downloadRequests[0]) => {
     approveDownloadRequestExtended(req.id, '当前用户')
+    showToast('审批已通过')
   }
 
-  const handleRequestDownload = (pkgId: string) => {
-    const newId = requestDownloadFromPackage(pkgId, '当前用户')
-    if (newId) {
+  const handleRejectClick = (requestId: string) => {
+    setRejectModal({ open: true, requestId })
+    setRejectReason('')
+  }
+
+  const handleRejectConfirm = () => {
+    if (!rejectReason.trim()) return
+    rejectDownloadRequest(rejectModal.requestId, rejectReason.trim(), '当前用户')
+    setRejectModal({ open: false, requestId: '' })
+    setRejectReason('')
+    showToast('已拒绝申请')
+  }
+
+  const openDownloadRequestModal = (pkg: typeof packages[0]) => {
+    setDownloadRequestModal({
+      open: true,
+      packageId: pkg.id,
+      packageName: pkg.name,
+      targetChannels: pkg.targetChannels,
+      caseIds: pkg.caseIds,
+    })
+    if (pkg.targetChannels.length > 0) {
+      setReqChannel(pkg.targetChannels[0])
+    } else {
+      setReqChannel('')
+    }
+    setReqPlacementDate(new Date().toISOString().slice(0, 10))
+    setReqApplicant('当前用户')
+  }
+
+  const submitDownloadRequest = (packageId: string, packageName: string, caseIds: string[], targetChannels: string[]) => {
+    if (!reqApplicant.trim()) return
+    createDownloadRequest({
+      packageId,
+      packageName,
+      caseIds,
+      requestedBy: reqApplicant.trim(),
+      channel: reqChannel || undefined,
+      placementDate: reqPlacementDate || undefined,
+      targetChannels: targetChannels,
+    })
+    setAppliedPkgIds((prev) => {
+      const next = new Set(prev)
+      next.add(packageId)
+      return next
+    })
+    setTimeout(() => {
       setAppliedPkgIds((prev) => {
         const next = new Set(prev)
-        next.add(pkgId)
+        next.delete(packageId)
         return next
       })
-      setTimeout(() => {
-        setAppliedPkgIds((prev) => {
-          const next = new Set(prev)
-          next.delete(pkgId)
-          return next
-        })
-      }, 3000)
-    }
+    }, 3000)
+    showToast('申请已提交，等待审批')
+  }
+
+  const showToast = (msg: string) => {
+    setSuccessToast(msg)
+    setTimeout(() => setSuccessToast(''), 2000)
   }
 
   const pendingRequests = downloadRequests.filter((r) => r.status === 'pending')
+  const approvedRequests = downloadRequests.filter((r) => r.status === 'approved')
+  const displayRequests = approvalTab === 'pending' ? pendingRequests : downloadRequests
 
-  const totalDownloads = packages.reduce((sum, p) => sum + p.downloadCount, 0)
+  const totalDownloads = approvedRequests.length
   const totalPackages = packages.length
   const approvedPackages = packages.filter(p => p.status === 'approved').length
   const pendingCount = pendingRequests.length
 
   const channelTrackingData = useMemo(() => {
-    const channelMap = new Map<string, { packages: MaterialPackage[]; downloadCount: number; caseUsage: Map<string, number> }>()
+    const channelMap = new Map<string, { requestCount: number; packageIds: Set<string>; caseUsage: Map<string, number> }>()
 
-    packages.forEach((pkg) => {
-      pkg.targetChannels.forEach((ch) => {
-        if (!channelMap.has(ch)) {
-          channelMap.set(ch, { packages: [], downloadCount: 0, caseUsage: new Map() })
-        }
-        const data = channelMap.get(ch)!
-        data.packages.push(pkg)
-        data.downloadCount += pkg.downloadCount
-        pkg.caseIds.forEach((cid) => {
-          const current = data.caseUsage.get(cid) || 0
-          data.caseUsage.set(cid, current + 1)
-        })
+    approvedRequests.forEach((req) => {
+      const channel = req.channel || (req.targetChannels.length > 0 ? req.targetChannels[0] : '')
+      if (!channel) return
+
+      if (!channelMap.has(channel)) {
+        channelMap.set(channel, { requestCount: 0, packageIds: new Set(), caseUsage: new Map() })
+      }
+      const data = channelMap.get(channel)!
+      data.requestCount += 1
+      data.packageIds.add(req.packageId)
+
+      req.caseIds.forEach((cid) => {
+        const current = data.caseUsage.get(cid) || 0
+        data.caseUsage.set(cid, current + 1)
       })
     })
 
@@ -154,12 +221,13 @@ export default function Deploy() {
 
       return {
         channel,
-        packageCount: data.packages.length,
-        downloadCount: data.downloadCount,
+        packageCount: data.packageIds.size,
+        downloadCount: data.requestCount,
+        caseUsageCount: Array.from(data.caseUsage.values()).reduce((sum, c) => sum + c, 0),
         topCases: sortedCases,
       }
     })
-  }, [packages, assets])
+  }, [approvedRequests, assets])
 
   const CheckboxItem = ({ checked, onChange, label }: { checked: boolean; onChange: () => void; label: string }) => (
     <label className="flex items-center gap-2 cursor-pointer text-sm text-charcoal/70 hover:text-charcoal select-none">
@@ -387,54 +455,90 @@ export default function Deploy() {
         </div>
 
         <section>
-          <h2 className="section-title flex items-center gap-2 mb-4"><Download size={18} /> 下载审批</h2>
-          {pendingRequests.length === 0 ? (
-            <div className="card p-6 text-center text-charcoal/30 text-sm">暂无待审批请求</div>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="section-title flex items-center gap-2 mb-0"><Download size={18} /> 下载审批</h2>
+            <div className="flex gap-1 bg-cream/50 rounded-lg p-1">
+              <button
+                onClick={() => setApprovalTab('pending')}
+                className={`text-xs px-3 py-1.5 rounded-md transition-colors ${approvalTab === 'pending' ? 'bg-white text-charcoal shadow-sm font-medium' : 'text-charcoal/50 hover:text-charcoal'}`}
+              >
+                待审批 ({pendingRequests.length})
+              </button>
+              <button
+                onClick={() => setApprovalTab('all')}
+                className={`text-xs px-3 py-1.5 rounded-md transition-colors ${approvalTab === 'all' ? 'bg-white text-charcoal shadow-sm font-medium' : 'text-charcoal/50 hover:text-charcoal'}`}
+              >
+                全部 ({downloadRequests.length})
+              </button>
+            </div>
+          </div>
+          {displayRequests.length === 0 ? (
+            <div className="card p-6 text-center text-charcoal/30 text-sm">暂无{approvalTab === 'pending' ? '待审批' : ''}请求</div>
           ) : (
             <div className="space-y-2">
-              {pendingRequests.map((req) => {
+              {displayRequests.map((req) => {
                 const pkg = packages.find(p => p.id === req.packageId)
+                const channelDisplay = req.channel
+                  ? req.channel
+                  : (req.targetChannels.length > 0 ? `${req.targetChannels[0]}等` : '未指定渠道')
                 return (
                   <div key={req.id} className="card p-4">
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex-1 min-w-0 space-y-2">
-                        <div>
+                        <div className="flex items-center gap-2">
                           <p className="text-sm font-medium text-charcoal">{req.packageName}</p>
-                          <p className="text-xs text-charcoal/50">
-                            {req.requestedBy} · {req.requestedAt}
-                            {pkg && <span className="ml-2">· {pkg.caseIds.length} 个案例</span>}
-                          </p>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                            req.status === 'pending'
+                              ? 'bg-amber-100 text-amber-700'
+                              : req.status === 'approved'
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-red-100 text-red-700'
+                          }`}>
+                            {req.status === 'pending' ? '待审批' : req.status === 'approved' ? '已通过' : '已拒绝'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-charcoal/50">
+                          {req.requestedBy} · {req.requestedAt.slice(0, 10)}
+                          {pkg && <span className="ml-2">· {pkg.caseIds.length} 个案例</span>}
+                        </p>
+                        <div>
+                          <p className="text-[10px] text-charcoal/40 mb-1">投放渠道：</p>
+                          <span className="text-[10px] bg-rose-gold/10 text-rose-gold px-2 py-0.5 rounded-full">{channelDisplay}</span>
                         </div>
                         <div>
                           <p className="text-[10px] text-charcoal/40 mb-1">包含案例：</p>
-                          <div className="flex flex-wrap gap-1">
-                            {req.caseIds.slice(0, 8).map((cid) => {
-                              const c = assets.find(a => a.id === cid)
-                              return c ? (
-                                <span key={cid} className="text-[10px] bg-cream text-charcoal/60 px-2 py-0.5 rounded-full">
-                                  {c.customerName}
-                                  {c.mediaType === 'video' && <span className="text-rose-gold ml-0.5">▶</span>}
-                                </span>
-                              ) : null
-                            })}
-                            {req.caseIds.length > 8 && (
-                              <span className="text-[10px] text-charcoal/40 px-2 py-0.5">+{req.caseIds.length - 8}</span>
-                            )}
-                          </div>
+                          {req.caseIds.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {req.caseIds.slice(0, 8).map((cid) => {
+                                const c = assets.find(a => a.id === cid)
+                                return c ? (
+                                  <span key={cid} className="text-[10px] bg-cream text-charcoal/60 px-2 py-0.5 rounded-full">
+                                    {c.customerName}
+                                    {c.mediaType === 'video' && <span className="text-rose-gold ml-0.5">▶</span>}
+                                  </span>
+                                ) : null
+                              })}
+                              {req.caseIds.length > 8 && (
+                                <span className="text-[10px] text-charcoal/40 px-2 py-0.5">+{req.caseIds.length - 8}</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-charcoal/40">未知</span>
+                          )}
                         </div>
-                        <div>
-                          <p className="text-[10px] text-charcoal/40 mb-1">目标渠道：</p>
-                          <div className="flex flex-wrap gap-1">
-                            {req.targetChannels.map((ch) => (
-                              <span key={ch} className="text-[10px] bg-rose-gold/10 text-rose-gold px-2 py-0.5 rounded-full">{ch}</span>
-                            ))}
+                        {req.status === 'rejected' && req.rejectReason && (
+                          <div className="bg-red-50 rounded-lg p-2">
+                            <p className="text-[10px] text-red-600 font-medium">拒绝原因：</p>
+                            <p className="text-xs text-red-700">{req.rejectReason}</p>
                           </div>
+                        )}
+                      </div>
+                      {req.status === 'pending' && (
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <button onClick={() => handleApproveDownload(req)} className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1"><Check size={12} /> 批准</button>
+                          <button onClick={() => handleRejectClick(req.id)} className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1"><X size={12} /> 拒绝</button>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <button onClick={() => handleApproveDownload(req)} className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1"><Check size={12} /> 批准</button>
-                        <button onClick={() => updateDownloadRequest(req.id, { status: 'rejected' })} className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1"><X size={12} /> 拒绝</button>
-                      </div>
+                      )}
                     </div>
                   </div>
                 )
@@ -481,25 +585,40 @@ export default function Deploy() {
                     )}
                   </div>
                 </div>
-                {pkg.status === 'approved' && (
-                  <div className="mt-3 pt-3 border-t border-charcoal/5">
-                    <button
-                      onClick={() => handleRequestDownload(pkg.id)}
-                      disabled={appliedPkgIds.has(pkg.id)}
-                      className={`w-full text-xs py-1.5 rounded-lg flex items-center justify-center gap-1 transition-colors ${
-                        appliedPkgIds.has(pkg.id)
-                          ? 'bg-emerald/10 text-emerald cursor-default'
-                          : 'bg-rose-gold/10 text-rose-gold hover:bg-rose-gold/20'
-                      }`}
-                    >
-                      {appliedPkgIds.has(pkg.id) ? (
-                        <><Check size={12} /> 申请已提交</>
-                      ) : (
-                        <><Download size={12} /> 申请下载</>
+                <div className="mt-3 pt-3 border-t border-charcoal/5">
+                  {pkg.status === 'rejected' ? (
+                    <div className="space-y-1">
+                      <button
+                        disabled
+                        className="w-full text-xs py-1.5 rounded-lg flex items-center justify-center gap-1 bg-charcoal/5 text-charcoal/30 cursor-not-allowed"
+                      >
+                        <Download size={12} /> 申请投放
+                      </button>
+                      <p className="text-[10px] text-charcoal/30 text-center">素材包已拒绝</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <button
+                        onClick={() => openDownloadRequestModal(pkg)}
+                        disabled={appliedPkgIds.has(pkg.id)}
+                        className={`w-full text-xs py-1.5 rounded-lg flex items-center justify-center gap-1 transition-colors ${
+                          appliedPkgIds.has(pkg.id)
+                            ? 'bg-emerald/10 text-emerald cursor-default'
+                            : 'bg-rose-gold/10 text-rose-gold hover:bg-rose-gold/20'
+                        }`}
+                      >
+                        {appliedPkgIds.has(pkg.id) ? (
+                          <><Check size={12} /> 申请已提交</>
+                        ) : (
+                          <><Download size={12} /> 申请投放</>
+                        )}
+                      </button>
+                      {pkg.status === 'pending' && (
+                        <p className="text-[10px] text-amber-600/70 text-center">素材包待审批</p>
                       )}
-                    </button>
-                  </div>
-                )}
+                    </div>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -522,18 +641,22 @@ export default function Deploy() {
                       活跃渠道
                     </span>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 mb-3">
+                  <div className="grid grid-cols-3 gap-2 mb-3">
                     <div className="bg-cream/50 rounded-lg p-2">
-                      <p className="text-[10px] text-charcoal/40">素材包数量</p>
+                      <p className="text-[10px] text-charcoal/40">投放次数</p>
+                      <p className="text-base font-semibold text-charcoal">{data.downloadCount}</p>
+                    </div>
+                    <div className="bg-cream/50 rounded-lg p-2">
+                      <p className="text-[10px] text-charcoal/40">素材包数</p>
                       <p className="text-base font-semibold text-charcoal">{data.packageCount}</p>
                     </div>
                     <div className="bg-cream/50 rounded-lg p-2">
-                      <p className="text-[10px] text-charcoal/40">累计下载</p>
-                      <p className="text-base font-semibold text-charcoal">{data.downloadCount}</p>
+                      <p className="text-[10px] text-charcoal/40">案例使用</p>
+                      <p className="text-base font-semibold text-charcoal">{data.caseUsageCount}</p>
                     </div>
                   </div>
                   <div className="pt-3 border-t border-charcoal/5">
-                    <p className="text-[10px] text-charcoal/40 mb-2">使用案例（按使用次数排序）：</p>
+                    <p className="text-[10px] text-charcoal/40 mb-2">渠道热门案例：</p>
                     <div className="flex flex-wrap gap-1">
                       {data.topCases.slice(0, 8).map((item) => (
                         <span key={item.caseId} className="text-[10px] bg-cream text-charcoal/60 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
@@ -609,6 +732,174 @@ export default function Deploy() {
               确认创建（{selectedIds.size} 个案例）
             </button>
           </div>
+        </div>
+      )}
+
+      {postCreateRequestModal.open && (
+        <div className="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center" onClick={() => setPostCreateRequestModal({ ...postCreateRequestModal, open: false })}>
+          <div className="bg-white rounded-2xl w-[480px] p-6 space-y-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="section-title">素材包创建成功</h3>
+              <button onClick={() => setPostCreateRequestModal({ ...postCreateRequestModal, open: false })} className="btn-ghost p-1.5 rounded-lg"><X size={18} /></button>
+            </div>
+            <p className="text-sm text-charcoal/70">是否立即申请投放下载？</p>
+            <div>
+              <label className="text-xs font-medium text-charcoal/60 block mb-1.5">素材包名称</label>
+              <p className="text-sm text-charcoal bg-cream/50 rounded-lg px-3 py-2">{postCreateRequestModal.packageName}</p>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-charcoal/60 block mb-1.5">投放渠道</label>
+              <div className="flex flex-wrap gap-2">
+                {postCreateRequestModal.targetChannels.map((ch) => {
+                  const active = reqChannel === ch
+                  return (
+                    <button key={ch} onClick={() => setReqChannel(ch)} className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${active ? 'bg-rose-gold text-white border-rose-gold' : 'border-charcoal/15 text-charcoal/60 hover:border-rose-gold/50'}`}>
+                      {ch}
+                    </button>
+                  )
+                })}
+                {postCreateRequestModal.targetChannels.length === 0 && (
+                  <select className="input-field w-full text-sm" value={reqChannel} onChange={(e) => setReqChannel(e.target.value)}>
+                    <option value="">请选择渠道</option>
+                    {allChannels.map((ch) => (
+                      <option key={ch} value={ch}>{ch}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-charcoal/60 block mb-1.5">投放日期</label>
+              <input type="date" className="input-field w-full text-sm" value={reqPlacementDate} onChange={(e) => setReqPlacementDate(e.target.value)} />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-charcoal/60 block mb-1.5">申请人</label>
+              <input className="input-field w-full text-sm" placeholder="请输入申请人" value={reqApplicant} onChange={(e) => setReqApplicant(e.target.value)} />
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button onClick={() => setPostCreateRequestModal({ ...postCreateRequestModal, open: false })} className="btn-secondary flex-1 text-sm">
+                稍后再说
+              </button>
+              <button
+                onClick={() => {
+                  submitDownloadRequest(
+                    postCreateRequestModal.packageId,
+                    postCreateRequestModal.packageName,
+                    postCreateRequestModal.caseIds,
+                    postCreateRequestModal.targetChannels,
+                  )
+                  setPostCreateRequestModal({ ...postCreateRequestModal, open: false })
+                }}
+                disabled={!reqApplicant.trim() || (!reqChannel && postCreateRequestModal.targetChannels.length === 0)}
+                className="btn-primary flex-1 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                立即申请
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {downloadRequestModal.open && (
+        <div className="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center" onClick={() => setDownloadRequestModal({ ...downloadRequestModal, open: false })}>
+          <div className="bg-white rounded-2xl w-[480px] p-6 space-y-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="section-title">申请投放下载</h3>
+              <button onClick={() => setDownloadRequestModal({ ...downloadRequestModal, open: false })} className="btn-ghost p-1.5 rounded-lg"><X size={18} /></button>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-charcoal/60 block mb-1.5">素材包名称</label>
+              <p className="text-sm text-charcoal bg-cream/50 rounded-lg px-3 py-2">{downloadRequestModal.packageName}</p>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-charcoal/60 block mb-1.5">投放渠道</label>
+              {downloadRequestModal.targetChannels.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {downloadRequestModal.targetChannels.map((ch) => {
+                    const active = reqChannel === ch
+                    return (
+                      <button key={ch} onClick={() => setReqChannel(ch)} className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${active ? 'bg-rose-gold text-white border-rose-gold' : 'border-charcoal/15 text-charcoal/60 hover:border-rose-gold/50'}`}>
+                        {ch}
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : (
+                <select className="input-field w-full text-sm" value={reqChannel} onChange={(e) => setReqChannel(e.target.value)}>
+                  <option value="">请选择渠道</option>
+                  {allChannels.map((ch) => (
+                    <option key={ch} value={ch}>{ch}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <div>
+              <label className="text-xs font-medium text-charcoal/60 block mb-1.5">投放日期</label>
+              <input type="date" className="input-field w-full text-sm" value={reqPlacementDate} onChange={(e) => setReqPlacementDate(e.target.value)} />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-charcoal/60 block mb-1.5">申请人</label>
+              <input className="input-field w-full text-sm" placeholder="请输入申请人" value={reqApplicant} onChange={(e) => setReqApplicant(e.target.value)} />
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button onClick={() => setDownloadRequestModal({ ...downloadRequestModal, open: false })} className="btn-secondary flex-1 text-sm">
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  submitDownloadRequest(
+                    downloadRequestModal.packageId,
+                    downloadRequestModal.packageName,
+                    downloadRequestModal.caseIds,
+                    downloadRequestModal.targetChannels,
+                  )
+                  setDownloadRequestModal({ ...downloadRequestModal, open: false })
+                }}
+                disabled={!reqApplicant.trim()}
+                className="btn-primary flex-1 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                提交申请
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {rejectModal.open && (
+        <div className="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center" onClick={() => setRejectModal({ open: false, requestId: '' })}>
+          <div className="bg-white rounded-2xl w-[400px] p-6 space-y-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="section-title">拒绝申请</h3>
+              <button onClick={() => setRejectModal({ open: false, requestId: '' })} className="btn-ghost p-1.5 rounded-lg"><X size={18} /></button>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-charcoal/60 block mb-1.5">拒绝原因</label>
+              <textarea
+                className="input-field w-full text-sm min-h-[100px] resize-none"
+                placeholder="请输入拒绝原因..."
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+              />
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button onClick={() => setRejectModal({ open: false, requestId: '' })} className="btn-secondary flex-1 text-sm">
+                取消
+              </button>
+              <button
+                onClick={handleRejectConfirm}
+                disabled={!rejectReason.trim()}
+                className="btn-primary flex-1 text-sm bg-red-500 hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                确认拒绝
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {successToast && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[200] bg-emerald-500 text-white text-sm px-4 py-2 rounded-lg shadow-lg animate-fade-in">
+          {successToast}
         </div>
       )}
 
