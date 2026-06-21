@@ -26,6 +26,7 @@ export interface CaseAsset {
   canShowFace: boolean
   isBlurred: boolean
   blurAreas: BlurArea[]
+  blurReviewStatus: 'pending' | 'approved' | 'rejected'
   authorizationStatus: 'authorized' | 'pending' | 'rejected' | 'expired'
   authorizationExpiry: string
   tags: string[]

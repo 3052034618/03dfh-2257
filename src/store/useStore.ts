@@ -2,6 +2,34 @@ import { create } from 'zustand'
 import type { CaseAsset, MaterialPackage, DownloadRequest } from '@/types'
 import { caseAssets as initialAssets, materialPackages as initialPackages, downloadRequests as initialRequests } from '@/data/mockData'
 
+const STORAGE_KEY = 'aesthecase-store-v1'
+
+interface PersistedState {
+  assets: CaseAsset[]
+  packages: MaterialPackage[]
+  downloadRequests: DownloadRequest[]
+}
+
+function loadFromStorage(): PersistedState | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return null
+    return JSON.parse(raw)
+  } catch (e) {
+    return null
+  }
+}
+
+function saveToStorage(state: PersistedState) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  } catch (e) {
+    // ignore
+  }
+}
+
+const persisted = loadFromStorage()
+
 interface AppState {
   assets: CaseAsset[]
   packages: MaterialPackage[]
@@ -16,39 +44,118 @@ interface AppState {
 
   addDownloadRequest: (req: DownloadRequest) => void
   updateDownloadRequest: (id: string, updates: Partial<DownloadRequest>) => void
+
+  incrementUsageCount: (caseId: string, amount?: number) => void
+  incrementPackageUsage: (caseIds: string[], amount?: number) => void
+  resetStore: () => void
 }
 
-export const useStore = create<AppState>((set) => ({
-  assets: initialAssets,
-  packages: initialPackages,
-  downloadRequests: initialRequests,
+export const useStore = create<AppState>((set) => {
+  const baseState = {
+    assets: persisted?.assets || initialAssets,
+    packages: persisted?.packages || initialPackages,
+    downloadRequests: persisted?.downloadRequests || initialRequests,
+  }
 
-  addAsset: (asset) =>
-    set((state) => ({ assets: [...state.assets, asset] })),
+  const persist = (state: PersistedState) => {
+    saveToStorage(state)
+    return state
+  }
 
-  updateAsset: (id, updates) =>
-    set((state) => ({
-      assets: state.assets.map((a) => (a.id === id ? { ...a, ...updates } : a)),
-    })),
+  return {
+    ...baseState,
 
-  deleteAsset: (id) =>
-    set((state) => ({ assets: state.assets.filter((a) => a.id !== id) })),
+    addAsset: (asset) =>
+      set((state) => {
+        const next = { ...state, assets: [...state.assets, asset] }
+        persist(next)
+        return next
+      }),
 
-  addPackage: (pkg) =>
-    set((state) => ({ packages: [...state.packages, pkg] })),
+    updateAsset: (id, updates) =>
+      set((state) => {
+        const next = {
+          ...state,
+          assets: state.assets.map((a) => (a.id === id ? { ...a, ...updates } : a)),
+        }
+        persist(next)
+        return next
+      }),
 
-  updatePackage: (id, updates) =>
-    set((state) => ({
-      packages: state.packages.map((p) => (p.id === id ? { ...p, ...updates } : p)),
-    })),
+    deleteAsset: (id) =>
+      set((state) => {
+        const next = { ...state, assets: state.assets.filter((a) => a.id !== id) }
+        persist(next)
+        return next
+      }),
 
-  addDownloadRequest: (req) =>
-    set((state) => ({ downloadRequests: [...state.downloadRequests, req] })),
+    addPackage: (pkg) =>
+      set((state) => {
+        const next = { ...state, packages: [...state.packages, pkg] }
+        persist(next)
+        return next
+      }),
 
-  updateDownloadRequest: (id, updates) =>
-    set((state) => ({
-      downloadRequests: state.downloadRequests.map((r) =>
-        r.id === id ? { ...r, ...updates } : r
-      ),
-    })),
-}))
+    updatePackage: (id, updates) =>
+      set((state) => {
+        const next = {
+          ...state,
+          packages: state.packages.map((p) => (p.id === id ? { ...p, ...updates } : p)),
+        }
+        persist(next)
+        return next
+      }),
+
+    addDownloadRequest: (req) =>
+      set((state) => {
+        const next = { ...state, downloadRequests: [...state.downloadRequests, req] }
+        persist(next)
+        return next
+      }),
+
+    updateDownloadRequest: (id, updates) =>
+      set((state) => {
+        const next = {
+          ...state,
+          downloadRequests: state.downloadRequests.map((r) =>
+            r.id === id ? { ...r, ...updates } : r
+          ),
+        }
+        persist(next)
+        return next
+      }),
+
+    incrementUsageCount: (caseId, amount = 1) =>
+      set((state) => {
+        const next = {
+          ...state,
+          assets: state.assets.map((a) =>
+            a.id === caseId ? { ...a, usageCount: a.usageCount + amount } : a
+          ),
+        }
+        persist(next)
+        return next
+      }),
+
+    incrementPackageUsage: (caseIds, amount = 1) =>
+      set((state) => {
+        const next = {
+          ...state,
+          assets: state.assets.map((a) =>
+            caseIds.includes(a.id) ? { ...a, usageCount: a.usageCount + amount } : a
+          ),
+        }
+        persist(next)
+        return next
+      }),
+
+    resetStore: () => {
+      localStorage.removeItem(STORAGE_KEY)
+      set({
+        assets: initialAssets,
+        packages: initialPackages,
+        downloadRequests: initialRequests,
+      })
+    },
+  }
+})

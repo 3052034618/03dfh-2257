@@ -35,6 +35,7 @@ export default function Review() {
   const { assets, updateAsset } = useStore()
   const [expandedExpired, setExpandedExpired] = useState(false)
   const [expandedBlur, setExpandedBlur] = useState(false)
+  const [expandedRejectedBlur, setExpandedRejectedBlur] = useState(false)
 
   const pendingReview = assets
     .filter((a) => a.reviewStatus === 'pending' || a.authorizationStatus === 'pending')
@@ -48,7 +49,8 @@ export default function Review() {
     (a) => a.authorizationStatus === 'expired' || isExpiringSoon(a.authorizationExpiry)
   )
 
-  const blurredPending = pendingReview.filter((a) => a.isBlurred)
+  const blurredPending = pendingReview.filter((a) => a.isBlurred && a.blurReviewStatus === 'pending')
+  const blurredRejected = assets.filter((a) => a.isBlurred && a.blurReviewStatus === 'rejected')
 
   const totalPending = pendingReview.length
   const approvedToday = assets.filter(
@@ -72,10 +74,29 @@ export default function Review() {
   }
 
   const handleBlurApprove = (id: string) => {
-    updateAsset(id, { reviewStatus: 'approved' })
+    updateAsset(id, {
+      blurReviewStatus: 'approved',
+      reviewStatus: 'approved',
+      authorizationStatus: 'authorized',
+      authorizationExpiry: SIX_MONTHS_LATER,
+    })
   }
 
-  const handleBlurReject = (id: string) => {}
+  const handleBlurReject = (id: string) => {
+    updateAsset(id, {
+      blurReviewStatus: 'rejected',
+      reviewStatus: 'pending',
+      isBlurred: false,
+      blurAreas: [],
+    })
+  }
+
+  const handleBlurResubmit = (id: string) => {
+    updateAsset(id, {
+      blurReviewStatus: 'pending',
+      isBlurred: true,
+    })
+  }
 
   const handleRenew = (id: string) => {
     updateAsset(id, {
@@ -91,12 +112,19 @@ export default function Review() {
         <p className="text-charcoal/60 mt-1">审核素材合规性与顾客授权状态</p>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="card p-4 flex items-center gap-3">
           <Clock className="w-5 h-5 text-amber-warn" />
           <div>
             <p className="text-sm text-charcoal/60">待审核</p>
             <p className="text-xl font-semibold text-charcoal">{totalPending}</p>
+          </div>
+        </div>
+        <div className="card p-4 flex items-center gap-3">
+          <EyeOff className="w-5 h-5 text-amber-warn" />
+          <div>
+            <p className="text-sm text-charcoal/60">打码待确认</p>
+            <p className="text-xl font-semibold text-charcoal">{blurredPending.length}</p>
           </div>
         </div>
         <div className="card p-4 flex items-center gap-3">
@@ -229,6 +257,46 @@ export default function Review() {
                       <X className="w-3 h-3" /> 退回
                     </button>
                   </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {blurredRejected.length > 0 && (
+        <div className="mt-6">
+          <button
+            onClick={() => setExpandedRejectedBlur(!expandedRejectedBlur)}
+            className="section-title flex items-center gap-2 cursor-pointer"
+          >
+            <X className="w-5 h-5 text-rose-gold" />
+            打码已退回
+            <span className="badge-rejected text-xs">{blurredRejected.length}</span>
+            <ChevronDown className={`w-4 h-4 transition-transform ${expandedRejectedBlur ? 'rotate-180' : ''}`} />
+          </button>
+          {expandedRejectedBlur && (
+            <div className="card mt-3 space-y-3 p-4 bg-rose-gold/5">
+              {blurredRejected.map((a) => (
+                <div key={a.id} className="flex items-center gap-4 border-b border-cream-dark/30 pb-3 last:border-0 last:pb-0">
+                  <div className="relative">
+                    <img src={a.thumbnailUrl} alt="" className="w-12 h-12 rounded object-cover opacity-80" />
+                    <div className="absolute -top-1 -right-1 bg-rose-gold rounded-full p-0.5">
+                      <X className="w-3 h-3 text-white" />
+                    </div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-charcoal text-sm">{a.customerName} - {a.treatmentProject}</p>
+                    <p className="text-xs text-rose-gold">
+                      打码不符合规范，请重新处理后再次提交
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleBlurResubmit(a.id)}
+                    className="btn-secondary flex items-center gap-1 px-3 py-1 text-xs"
+                  >
+                    <RefreshCw className="w-3 h-3" /> 重新提交打码
+                  </button>
                 </div>
               ))}
             </div>

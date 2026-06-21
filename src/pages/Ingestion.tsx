@@ -13,12 +13,61 @@ interface UploadedFile {
 }
 
 const PLACEHOLDER_IMG = 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=medical%20beauty%20photo%20clinical&image_size=square'
+const VIDEO_PLACEHOLDER = 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=video%20play%20icon%20medical%20beauty%20dark%20background&image_size=square'
 
 function getAgeGroup(age: number): string {
   if (age <= 30) return '18-30'
   if (age <= 40) return '31-40'
   if (age <= 50) return '41-50'
   return '50+'
+}
+
+function readFileAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+function generateVideoThumbnail(file: File): Promise<string> {
+  return new Promise((resolve) => {
+    const video = document.createElement('video')
+    video.preload = 'metadata'
+    video.muted = true
+    video.src = URL.createObjectURL(file)
+    video.onloadeddata = () => {
+      video.currentTime = Math.min(1, video.duration / 2)
+      video.onseeked = () => {
+        try {
+          const canvas = document.createElement('canvas')
+          canvas.width = video.videoWidth || 320
+          canvas.height = video.videoHeight || 320
+          const ctx = canvas.getContext('2d')
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+            const dataURL = canvas.toDataURL('image/jpeg', 0.8)
+            URL.revokeObjectURL(video.src)
+            resolve(dataURL)
+            return
+          }
+        } catch (e) {
+          // fallback
+        }
+        URL.revokeObjectURL(video.src)
+        resolve(VIDEO_PLACEHOLDER)
+      }
+    }
+    video.onerror = () => {
+      URL.revokeObjectURL(video.src)
+      resolve(VIDEO_PLACEHOLDER)
+    }
+    setTimeout(() => {
+      URL.revokeObjectURL(video.src)
+      resolve(VIDEO_PLACEHOLDER)
+    }, 3000)
+  })
 }
 
 export default function Ingestion() {
@@ -49,41 +98,51 @@ export default function Ingestion() {
   const updateField = <K extends keyof typeof form>(key: K, val: typeof form[K]) =>
     setForm((prev) => ({ ...prev, [key]: val }))
 
-  const simulateUpload = useCallback((name: string, type: 'photo' | 'video') => {
+  const processFile = useCallback(async (file: File) => {
+    const isVideo = file.type.startsWith('video')
+    const type = isVideo ? 'video' : 'photo'
     const id = 'F' + Date.now() + Math.random().toString(36).slice(2, 6)
-    const file: UploadedFile = { id, name, type, progress: 0, preview: PLACEHOLDER_IMG }
-    setFiles((prev) => [...prev, file])
+    let preview = isVideo ? VIDEO_PLACEHOLDER : PLACEHOLDER_IMG
+
+    setFiles((prev) => [...prev, { id, name: file.name, type, progress: 0, preview }])
+
+    try {
+      if (isVideo) {
+        preview = await generateVideoThumbnail(file)
+      } else {
+        preview = await readFileAsDataURL(file)
+      }
+    } catch (e) {
+      // keep placeholder
+    }
+
+    let progress = 0
     const interval = setInterval(() => {
+      progress = Math.min(progress + Math.random() * 25, 100)
       setFiles((prev) =>
-        prev.map((f) =>
-          f.id === id ? { ...f, progress: Math.min(f.progress + Math.random() * 25, 100) } : f
-        )
+        prev.map((f) => (f.id === id ? { ...f, progress, preview } : f))
       )
+      if (progress >= 100) {
+        clearInterval(interval)
+      }
     }, 300)
-    setTimeout(() => clearInterval(interval), 2000)
   }, [])
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault()
       setDragOver(false)
-      Array.from(e.dataTransfer.files).forEach((f) => {
-        const isVideo = f.type.startsWith('video')
-        simulateUpload(f.name, isVideo ? 'video' : 'photo')
-      })
+      Array.from(e.dataTransfer.files).forEach((f) => processFile(f))
     },
-    [simulateUpload]
+    [processFile]
   )
 
   const handleFileSelect = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      Array.from(e.target.files || []).forEach((f) => {
-        const isVideo = f.type.startsWith('video')
-        simulateUpload(f.name, isVideo ? 'video' : 'photo')
-      })
+      Array.from(e.target.files || []).forEach((f) => processFile(f))
       e.target.value = ''
     },
-    [simulateUpload]
+    [processFile]
   )
 
   const removeFile = (id: string) => setFiles((prev) => prev.filter((f) => f.id !== id))
@@ -124,6 +183,7 @@ export default function Ingestion() {
           canShowFace: form.canShowFace,
           isBlurred: blurEnabled,
           blurAreas: [],
+          blurReviewStatus: blurEnabled ? 'pending' : 'approved',
           authorizationStatus: 'pending',
           authorizationExpiry: '',
           tags: selectedTags,
@@ -173,13 +233,29 @@ export default function Ingestion() {
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
             {files.map((f) => (
               <div key={f.id} className="relative group rounded-lg overflow-hidden border border-charcoal/5 bg-cream-dark/50">
-                <img src={f.preview} alt={f.name} className={`w-full aspect-square object-cover ${blurEnabled ? 'blur-md' : ''}`} />
+                {f.type === 'video' ? (
+                  <div className="relative aspect-square">
+                    <img src={f.preview} alt={f.name} className={`w-full h-full object-cover ${blurEnabled ? 'blur-md' : ''}`} />
+                    <div className="absolute inset-0 flex items-center justify-center bg-charcoal/30">
+                      <div className="w-10 h-10 rounded-full bg-rose-gold/90 flex items-center justify-center">
+                        <Video size={20} className="text-white ml-0.5" />
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <img src={f.preview} alt={f.name} className={`w-full aspect-square object-cover ${blurEnabled ? 'blur-md' : ''}`} />
+                )}
                 <div className="absolute top-2 left-2 bg-charcoal/60 rounded-full p-1">
                   {f.type === 'photo' ? <Image size={12} className="text-white" /> : <Video size={12} className="text-white" />}
                 </div>
-                <button onClick={() => removeFile(f.id)} className="absolute top-2 right-2 bg-charcoal/60 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <X size={12} className="text-white" />
-                </button>
+                <div className="absolute top-2 right-2 flex gap-1">
+                  {f.type === 'video' && (
+                    <span className="bg-rose-gold/90 text-white text-[10px] px-1.5 py-0.5 rounded">视频</span>
+                  )}
+                  <button onClick={() => removeFile(f.id)} className="bg-charcoal/60 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <X size={12} className="text-white" />
+                  </button>
+                </div>
                 {f.progress < 100 && (
                   <div className="absolute bottom-0 left-0 right-0 bg-charcoal/20 p-2">
                     <div className="h-1 bg-charcoal/10 rounded-full overflow-hidden">
@@ -289,7 +365,14 @@ export default function Ingestion() {
             <p className="text-xs text-charcoal/40 mt-2">归档键: {archiveKey}</p>
             <div className="flex gap-2 mt-3">
               {files.slice(0, 4).map((f) => (
-                <img key={f.id} src={f.preview} alt="" className={`w-12 h-12 rounded object-cover border border-charcoal/5 ${blurEnabled ? 'blur-sm' : ''}`} />
+                <div key={f.id} className="relative">
+                  <img src={f.preview} alt="" className={`w-12 h-12 rounded object-cover border border-charcoal/5 ${blurEnabled ? 'blur-sm' : ''}`} />
+                  {f.type === 'video' && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <Video size={12} className="text-white" />
+                    </div>
+                  )}
+                </div>
               ))}
               {files.length > 4 && <span className="text-xs text-charcoal/40 self-center">+{files.length - 4} 更多</span>}
             </div>

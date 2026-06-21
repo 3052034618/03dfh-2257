@@ -9,7 +9,7 @@ import { allChannels, treatmentProjects } from '@/data/mockData'
 const ageGroups = ['18-30', '31-40', '41-50']
 
 export default function Deploy() {
-  const { assets, packages, downloadRequests, addPackage, updateDownloadRequest } = useStore()
+  const { assets, packages, downloadRequests, addPackage, updatePackage, updateDownloadRequest, incrementPackageUsage } = useStore()
   const [filterOpen, setFilterOpen] = useState(true)
   const [selectedProjects, setSelectedProjects] = useState<string[]>([])
   const [selectedAgeGroups, setSelectedAgeGroups] = useState<string[]>([])
@@ -77,20 +77,40 @@ export default function Deploy() {
       downloadCount: 0,
     }
     addPackage(pkg)
+    incrementPackageUsage(Array.from(selectedIds), 1)
     setSelectedIds(new Set())
     setShowPkgModal(false)
     setPkgName('')
     setPkgChannels([])
   }
 
+  const handleApproveDownload = (req: typeof downloadRequests[0]) => {
+    updateDownloadRequest(req.id, { status: 'approved' })
+    const pkg = packages.find((p) => p.id === req.packageId)
+    if (pkg) {
+      updatePackage(pkg.id, { downloadCount: pkg.downloadCount + 1 })
+      incrementPackageUsage(pkg.caseIds, 1)
+    }
+  }
+
   const pendingRequests = downloadRequests.filter((r) => r.status === 'pending')
 
   const CheckboxItem = ({ checked, onChange, label }: { checked: boolean; onChange: () => void; label: string }) => (
-    <label className="flex items-center gap-2 cursor-pointer text-sm text-charcoal/70 hover:text-charcoal">
-      <span className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${checked ? 'bg-rose-gold border-rose-gold text-white' : 'border-charcoal/20'}`}>
+    <label className="flex items-center gap-2 cursor-pointer text-sm text-charcoal/70 hover:text-charcoal select-none">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={onChange}
+        className="sr-only"
+      />
+      <span
+        className={`w-4 h-4 rounded border flex items-center justify-center transition-colors flex-shrink-0 ${
+          checked ? 'bg-rose-gold border-rose-gold text-white' : 'border-charcoal/20'
+        }`}
+      >
         {checked && <Check size={12} />}
       </span>
-      <span onClick={onChange}>{label}</span>
+      <span className="select-none">{label}</span>
     </label>
   )
 
@@ -231,7 +251,7 @@ export default function Deploy() {
                     <p className="text-xs text-charcoal/50">{req.requestedBy} · {req.requestedAt}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button onClick={() => updateDownloadRequest(req.id, { status: 'approved' })} className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1"><Check size={12} /> 批准</button>
+                    <button onClick={() => handleApproveDownload(req)} className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1"><Check size={12} /> 批准</button>
                     <button onClick={() => updateDownloadRequest(req.id, { status: 'rejected' })} className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1"><X size={12} /> 拒绝</button>
                   </div>
                 </div>
